@@ -1,0 +1,57 @@
+apiVersion: hadoop.apache.org/v1alpha1
+kind: HadoopCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: example-hadoop
+    app.kubernetes.io/part-of: hadoop-operator
+  name: example-hadoop
+spec:
+  image: zhuyifeiruichuang/hadoop:3.1.1
+  nameNode:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+      limits:
+        cpu: "1000m"
+        memory: "4Gi"
+    storage:
+      size: "20Gi"
+      storageClass: "local"
+  dataNode:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+      limits:
+        cpu: "1000m"
+        memory: "4Gi"
+    storage:
+      size: "20Gi"
+      storageClass: "local"
+  resourceManager:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "1000m"
+        memory: "2Gi"
+  nodeManager:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "1000m"
+        memory: "2Gi"
+  hadoopConfig:
+    coreSite: {}
+    hdfsSite: {}
+    yarnSite: {}
+    mapredSite: {}

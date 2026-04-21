@@ -1,0 +1,236 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+    component: namenode
+spec:
+  ports:
+    - port: 9870
+      name: web
+    - port: 9000
+      name: rpc
+  clusterIP: None
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode-external
+  labels:
+    app: hadoop-namenode
+    component: namenode
+spec:
+  type: NodePort
+  ports:
+    - port: 9870
+      name: web
+      targetPort: 9870
+      nodePort: 30070
+    - port: 9000
+      name: rpc
+      targetPort: 9000
+      nodePort: 30090
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+spec:
+  serviceName: namenode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+        component: namenode
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9870"
+    spec:
+      serviceAccountName: hadoop
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+
+      initContainers:
+      - name: init-namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            echo "Step 1: Preparing directories and permissions..."
+            mkdir -p /opt/hadoop/data/nn
+            chown -R hadoop:hadoop /opt/hadoop/data
+            
+            echo "Step 2: Checking if NameNode needs formatting..."
+            if [ ! -f /opt/hadoop/data/nn/current/VERSION ]; then
+              echo "No VERSION file found. Formatting NameNode..."
+              su hadoop -c "hdfs namenode -format -nonInteractive"
+              echo "Formatting completed successfully."
+            else
+              echo "NameNode already formatted (VERSION file exists). Skipping."
+              grep -i "clusterID" /opt/hadoop/data/nn/current/VERSION
+            fi
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+            subPath: nn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+
+      containers:
+      - name: namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args: ["exec hdfs namenode"]
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: HADOOP_HEAPSIZE
+            value: "1024"
+        ports:
+          - containerPort: 9870
+            name: web
+            protocol: TCP
+          - containerPort: 9000
+            name: rpc
+            protocol: TCP
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+            ephemeral-storage: "1Gi"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+            ephemeral-storage: "2Gi"
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              nc -z localhost 9870 || exit 1
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 40
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 100
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - |
+                su hadoop -c "hdfs dfsadmin -safemode leave" || true
+                sleep 10
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+            subPath: nn
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - hadoop-namenode
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+              - key: node.kubernetes.io/disk-pressure
+                operator: DoesNotExist
+
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+
+      nodeSelector:
+        hadoop-role: master
+
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-nn-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 20Gi

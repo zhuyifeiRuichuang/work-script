@@ -1,0 +1,29 @@
+
+services:
+  mysql8-single:
+    image: mysql:8.4.8
+    container_name: mysql8-single
+    restart: unless-stopped
+    healthcheck:
+      test: mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./my.cnf:/etc/mysql/conf.d/my.cnf
+      - mysql8-data:/var/lib/mysql
+      - mysql8-log:/var/log/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_ROOT_HOST: "%"
+      TZ: Asia/Shanghai
+      LANG: C.UTF-8
+
+volumes:
+  mysql8-data:
+    name: mysql8-data
+  mysql8-log:
+    name: mysql8-log

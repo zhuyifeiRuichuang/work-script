@@ -1,0 +1,25 @@
+
+services:
+  mysql5-single:
+    image: mysql:5.7.44
+    container_name: mysql5-single
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_ROOT_HOST: '%'
+    volumes:
+      - mysql5-data:/var/lib/mysql
+      - ./my.cnf:/etc/mysql/conf.d/my.cnf
+    healthcheck:
+      test: mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  mysql5-data:
+    name: mysql5-data

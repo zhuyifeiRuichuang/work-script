@@ -1,0 +1,82 @@
+# 1. 基础镜像改为 Ubuntu 25.10
+FROM ubuntu:25.10
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 2. 安全删除内置 UID 1000 用户
+# 使用脚本逻辑确保即使 1000 用户名不是 'ubuntu' 也能正确删除
+RUN if getent passwd 1000; then \
+        userdel -f $(getent passwd 1000 | cut -d: -f1); \
+    fi && \
+    if getent group 1000; then \
+        groupdel $(getent group 1000 | cut -d: -f1); \
+    fi
+
+# 3. 更新包列表并安装
+RUN apt-get update && apt-get install -y \
+    sudo \
+    python3-pip \
+    python3-venv \
+    python-is-python3 \
+    wget \
+    curl \
+    netcat-openbsd \
+    jq \
+    openjdk-11-jdk \
+    krb5-user \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 4. 安装 Robotframework
+# python-is-python3 会把 /usr/bin/python 指向 python3
+RUN pip install --break-system-packages robotframework
+
+# 5. 下载 dumb-init (更新到较新版本)
+RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64 && \
+    chmod +x /usr/local/bin/dumb-init
+
+# 6. 权限与目录初始化
+RUN mkdir -p /opt/security/keytabs && chmod -R a+wr /opt/security/keytabs 
+ADD https://repo.maven.apache.org/maven2/org/jboss/byteman/byteman/4.0.4/byteman-4.0.4.jar /opt/byteman.jar
+RUN chmod o+r /opt/byteman.jar
+
+# 7. 安装 Async-profiler
+RUN mkdir -p /opt/profiler && \
+    cd /opt/profiler && \
+    curl -L https://github.com/jvm-profiling-tools/async-profiler/releases/download/v1.5/async-profiler-1.5-linux-x64.tar.gz | tar xvz
+
+# 8. 环境变量
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$PATH:/opt/hadoop/bin
+ENV PYTHONPATH=/opt/scripts
+
+# 9. 创建 Hadoop 用户 (UID 1000)
+RUN groupadd --gid 1000 hadoop && \
+    useradd --uid 1000 hadoop --gid 1000 --home /opt/hadoop --create-home --shell /bin/bash
+
+# 允许 hadoop 用户使用 sudo (krb5.conf 修改需要)
+RUN echo "hadoop ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# 10. 添加脚本
+# 注意：先创建目录并赋权，再 ADD，防止权限丢失
+RUN mkdir -p /opt/scripts
+ADD scripts /opt/scripts/
+# 赋予执行权限
+RUN chmod +x /opt/scripts/*.sh /opt/scripts/*.py
+
+# 11. 目录准备
+RUN mkdir -p /opt/hadoop /var/log/hadoop && \
+    chmod 1777 /opt/hadoop /var/log/hadoop && \
+    chown -R hadoop:hadoop /opt/hadoop
+
+ENV HADOOP_LOG_DIR=/var/log/hadoop
+ENV HADOOP_CONF_DIR=/opt/hadoop
+
+WORKDIR /opt/hadoop
+RUN mkdir /data && chmod 1777 /data && chown hadoop:hadoop /data
+
+# 12. 运行配置
+USER hadoop
+# 确保指向正确的脚本路径
+ENTRYPOINT ["/usr/local/bin/dumb-init", "--", "/opt/scripts/starter.sh"]

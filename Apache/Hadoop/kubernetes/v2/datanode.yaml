@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode
+  labels:
+    app: hadoop-datanode
+spec:
+  ports:
+    - port: 9864
+      name: web
+      targetPort: 9864
+    - port: 9866
+      name: data
+      targetPort: 9866
+  clusterIP: None
+  selector:
+    app: hadoop-datanode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+spec:
+  serviceName: datanode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+    spec:
+      initContainers:
+      - name: wait-for-namenode
+        image: docker.1ms.run/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: 
+        - sh
+        - -c
+        - |
+          echo "⏳ 正在检测 NameNode 状态..."
+          # 等待 NameNode Web UI 就绪
+          while ! curl -sf http://namenode-0.namenode.bigdata4:9870 > /dev/null; do
+            echo "   NameNode Web UI 未响应，继续等待..."
+            sleep 5
+          done
+          echo "✅ NameNode Web UI 已就绪"
+          
+          # 等待 RPC 端口
+          while ! nc -z namenode-0.namenode.bigdata4 9000; do
+            echo "   NameNode RPC 端口未就绪，继续等待..."
+            sleep 5
+          done
+          echo "✅ NameNode RPC 端口已就绪"
+          
+          # 等待退出安全模式（可选但推荐）
+          # echo "🛡️  检查 NameNode 安全模式状态..."
+          # while hdfs dfsadmin -safemode get | grep -q "ON"; do
+          #   echo "   NameNode 处于安全模式，等待退出..."
+          #   sleep 10
+          # done
+          # echo "✅ NameNode 已退出安全模式，可以启动 DataNode"
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+        volumeMounts:
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+      containers:
+      - name: datanode
+        image: docker.1ms.run/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: 
+        - sh
+        - -c
+        - |
+          sudo mkdir -p /opt/hadoop/data/dn
+          sudo chown -R hadoop:hadoop /opt/hadoop/data
+          exec hdfs datanode  # 使用 exec 确保信号传递
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+        ports:
+          - containerPort: 9864
+            name: web
+          - containerPort: 9866
+            name: data
+        volumeMounts:
+          - name: hadoop-dn-data
+            mountPath: /opt/hadoop/data/dn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-dn-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 20Gi

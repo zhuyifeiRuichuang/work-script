@@ -1,0 +1,136 @@
+# Hadoop Cluster with HBase Example
+# This YAML deploys a Hadoop cluster with HBase enabled
+apiVersion: hadoop.kubedoop.dev/v1
+kind: HadoopCluster
+metadata:
+  name: hadoop-with-hbase
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoop-with-hbase
+    app.kubernetes.io/part-of: hadoop-operator
+spec:
+  # Global image configuration
+  image: apache/hadoop:3.4.1
+  imagePullPolicy: IfNotPresent
+  serviceAccountName: hadoop-operator
+
+  # NameNode Configuration
+  nameNodeSpec:
+    replicas: 2
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi
+    ports:
+      rpcPort: 9000
+      httpPort: 9870
+
+  # DataNode Configuration
+  dataNodeSpec:
+    replicas: 5
+    resources:
+      limits:
+        cpu: "4"
+        memory: 8Gi
+      requests:
+        cpu: "2"
+        memory: 4Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 200Gi
+
+  # ResourceManager Configuration
+  resourceManagerSpec:
+    replicas: 2
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    ports:
+      httpPort: 8088
+
+  # NodeManager Configuration
+  nodeManagerSpec:
+    replicas: 5
+    resources:
+      limits:
+        cpu: "4"
+        memory: 16Gi
+      requests:
+        cpu: "2"
+        memory: 8Gi
+
+  # HBase Configuration
+  hbaseSpec:
+    enabled: true
+    masterSpec:
+      replicas: 2
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+        requests:
+          cpu: "1"
+          memory: 2Gi
+      storage:
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi
+      ports:
+        webUIPort: 16010
+    regionServerSpec:
+      replicas: 3
+      resources:
+        limits:
+          cpu: "4"
+          memory: 8Gi
+        requests:
+          cpu: "2"
+          memory: 4Gi
+      storage:
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 50Gi
+      volumesPerNode: 1
+      ports:
+        webUIPort: 16030
+    config:
+      hbaseSite:
+        hbase.cluster.distributed: "true"
+        hbase.rootdir: "hdfs://hadoop-with-hbase-namenode:9000/hbase"
+        hbase.zookeeper.quorum: "zk-svc.default.svc.cluster.local"
+        hbase.zookeeper.property.clientPort: "2181"
+        hbase.unsafe.stream.capability.enforce: "false"
+      hbaseEnv:
+        HBASE_HEAPSIZE: "4096"
+        HBASE_OPTS: "-XX:+UseG1GC"
+
+  # High Availability Configuration
+  ha:
+    nameNodeHA:
+      enabled: true
+      nameServiceId: ns1
+      replicas: 2
+    resourceManagerHA:
+      enabled: true
+      clusterId: rm-cluster
+      replicas: 2

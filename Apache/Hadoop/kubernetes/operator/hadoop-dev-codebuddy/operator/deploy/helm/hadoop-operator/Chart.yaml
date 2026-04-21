@@ -1,0 +1,24 @@
+apiVersion: v2
+name: hadoop-operator
+description: A Kubernetes operator for managing Apache Hadoop clusters
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">= 1.24.0"
+keywords:
+  - hadoop
+  - operator
+  - kubedoop
+  - bigdata
+  - hdfs
+  - yarn
+  - hbase
+maintainers:
+  - name: Hadoop Operator Team
+    email: hadoop-operator@example.com
+sources:
+  - https://github.com/hadoop-operator/hadoop-k8s-operator
+icon: https://hadoop.apache.org/images/hadoop-logo.jpg
+annotations:
+  category: BigData
+  licenses: Apache-2.0

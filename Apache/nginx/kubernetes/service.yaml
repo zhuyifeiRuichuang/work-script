@@ -1,0 +1,28 @@
+# --- 集群内访问 (ClusterIP Service) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-internal-service
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+
+---
+# --- 集群外访问 (type可选LoadBalancer/NodePort) ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-external-service
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: NodePort

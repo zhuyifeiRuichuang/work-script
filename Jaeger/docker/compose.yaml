@@ -1,0 +1,16 @@
+
+services:
+  jaeger:
+    image: jaegertracing/jaeger:2.16.0
+    container_name: jaeger
+    restart: always
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+      - "5778:5778"
+      - "9411:9411"
+    # volumes:
+    # config.yaml可参考https://github.com/jaegertracing/jaeger/tree/main/cmd/jaeger
+    #   - ./config.yaml:/jaeger/config.yaml
+    # command: --config /jaeger/config.yaml

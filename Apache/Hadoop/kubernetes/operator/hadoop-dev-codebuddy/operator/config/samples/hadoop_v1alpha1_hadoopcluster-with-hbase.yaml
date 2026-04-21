@@ -1,0 +1,146 @@
+apiVersion: hadoop.kubedoop.dev/v1
+kind: HadoopCluster
+metadata:
+  name: hadoopcluster-with-hbase
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoopcluster-with-hbase
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: hadoop-k8s-operator
+spec:
+  # Hadoop image
+  image: apache/hadoop:3.4.1
+  imagePullPolicy: IfNotPresent
+
+  # Cluster configuration
+  clusterConfig:
+    zooKeeperConfigMapName: hadoopcluster-with-hbase-zk
+    replicationFactor: 3
+    blockSize: 134217728
+    clusterDomain: cluster.local
+    service:
+      type: ClusterIP
+
+  # NameNode configuration
+  nameNodeSpec:
+    replicas: 2
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi
+
+  # JournalNode for HA
+  journalNodeSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "1"
+        memory: 2Gi
+      requests:
+        cpu: "500m"
+        memory: 1Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 20Gi
+
+  # DataNode configuration
+  dataNodeSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Gi
+    volumesPerNode: 1
+
+  # ResourceManager configuration
+  resourceManagerSpec:
+    replicas: 1
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+
+  # NodeManager configuration
+  nodeManagerSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+
+  # HBase configuration
+  hbaseSpec:
+    enabled: true
+    masterSpec:
+      replicas: 2
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+        requests:
+          cpu: "1"
+          memory: 2Gi
+      storage:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+    regionServerSpec:
+      replicas: 3
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+        requests:
+          cpu: "1"
+          memory: 2Gi
+      storage:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi
+      volumesPerNode: 1
+    config:
+      hbaseSite:
+        hbase.cluster.distributed: "true"
+        hbase.rootdir: "hdfs://ns/hbase"
+        hbase.zookeeper.quorum: "zookeeper"
+        hbase.wal.provider: "filesystem"
+      hbaseEnv:
+        HBASE_HEAPSIZE: 2048
+        HBASE_REGIONSERVER_HEAPSIZE: 4096

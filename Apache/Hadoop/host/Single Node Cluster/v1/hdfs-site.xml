@@ -1,0 +1,30 @@
+<configuration>
+  <property>
+    <name>dfs.replication</name>
+    <value>1</value>
+  </property>
+  <property>
+    <name>dfs.namenode.name.dir</name>
+    <value>file:///data/hadoop/nn</value>
+    </property>
+  <property>
+    <name>dfs.datanode.data.dir</name>
+    <value>file:///data/hadoop/dn</value>
+    </property>
+  <property>
+    <name>dfs.namenode.secondary.http-address</name>
+    <value>0.0.0.0:9868</value>
+    </property>
+  <property>
+    <name>dfs.namenode.http-address</name>
+    <value>0.0.0.0:9870</value>
+    </property>
+  <property>
+    <name>dfs.datanode.http.address</name>
+    <value>0.0.0.0:9864</value>
+  </property>
+  <property>
+    <name>dfs.permissions.enabled</name>
+    <value>true</value>
+  </property>
+</configuration>

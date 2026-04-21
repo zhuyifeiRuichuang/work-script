@@ -1,0 +1,140 @@
+---
+# 1. ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+data:
+  my.cnf: |
+    [mysqld]
+    default-authentication-plugin=mysql_native_password
+    skip-name-resolve
+    log_bin=mysql-bin
+    binlog_format=ROW
+    gtid_mode=ON
+    enforce_gtid_consistency=ON
+    log_slave_updates=ON
+
+  init-replication.sh: |
+    #!/bin/bash
+    set -e
+    [[ $HOSTNAME =~ -([0-9]+)$ ]] || exit 1
+    ordinal=${BASH_REMATCH[1]}
+    
+    echo "[mysqld]" > /etc/mysql/conf.d/server-id.cnf
+    echo "server-id=$((100 + $ordinal))" >> /etc/mysql/conf.d/server-id.cnf
+    
+    if [[ $ordinal -gt 0 ]]; then
+      echo "read_only=ON" >> /etc/mysql/conf.d/server-id.cnf
+    fi
+
+  config-slave.sh: |
+    #!/bin/bash
+    set -ex
+    [[ $HOSTNAME =~ -([0-9]+)$ ]] || exit 1
+    ordinal=${BASH_REMATCH[1]}
+    
+    if [[ $ordinal -gt 0 ]]; then
+      echo "Waiting for Master (mysql-0) to be ready..."
+      until mysql -h mysql-0.mysql -u root -p$MYSQL_ROOT_PASSWORD -e "SELECT 1"; do sleep 5; done
+      
+      echo "Configuring Replication..."
+      mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='mysql-0.mysql', SOURCE_USER='root', SOURCE_PASSWORD='$MYSQL_ROOT_PASSWORD', SOURCE_AUTO_POSITION=1;" || true
+      mysql -u root -p$MYSQL_ROOT_PASSWORD -e "START REPLICA;" || true
+    fi
+---
+# 2. Service (Headless)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  ports:
+  - port: 3306
+    name: mysql
+  clusterIP: None
+  selector:
+    app: mysql
+---
+# 3. Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-write
+spec:
+  ports:
+  - port: 3306
+  selector:
+    app: mysql
+    statefulset.kubernetes.io/pod-name: mysql-0
+---
+# 4. Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-read
+spec:
+  ports:
+  - port: 3306
+  selector:
+    app: mysql
+---
+# 5. StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  selector:
+    matchLabels:
+      app: mysql
+  serviceName: "mysql"
+  replicas: 3 
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      initContainers:
+      - name: init-mysql
+        image: mysql:9.5.0
+        command: ["bash", "/config/init-replication.sh"]
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: conf-d
+          mountPath: /etc/mysql/conf.d
+      containers:
+      - name: mysql
+        image: mysql:9.5.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "Pass123!"
+        ports:
+        - containerPort: 3306
+
+        lifecycle:
+          postStart:
+            exec:
+              command: ["bash", "/config/config-slave.sh"]
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        - name: config
+          mountPath: /config
+        - name: conf-d
+          mountPath: /etc/mysql/conf.d
+      volumes:
+      - name: config
+        configMap:
+          name: mysql-config
+      - name: conf-d
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi

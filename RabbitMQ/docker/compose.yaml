@@ -1,0 +1,32 @@
+# 部署RabbitMQ
+
+volumes:
+  rabbitmq-data:
+    name: rabbitmq-data
+
+networks:
+  rabbitmq:
+    name: rabbitmq
+    driver: bridge
+
+services:
+  rabbitmq:
+    image: rabbitmq:4.2.5-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    restart: unless-stopped
+
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+    environment:
+      - RABBITMQ_DEFAULT_USER=rabbitmq
+      - RABBITMQ_DEFAULT_PASS=Ruichuang@123
+
+    volumes:
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - rabbitmq-data:/var/lib/rabbitmq
+
+    networks:
+      - rabbitmq

@@ -1,0 +1,34 @@
+FROM centos:7
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+RUN yum install -y epel-release && \
+    yum install -y sudo python3 python3-pip wget nmap-ncat jq java-1.8.0-openjdk-devel krb5-workstation which && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir robotframework
+RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64 && \
+    chmod +x /usr/local/bin/dumb-init
+RUN mkdir -p /etc/security/keytabs && chmod -R a+wr /etc/security/keytabs
+RUN curl -L -o /opt/byteman.jar https://repo.maven.apache.org/maven2/org/jboss/byteman/byteman/4.0.4/byteman-4.0.4.jar && \
+    chmod o+r /opt/byteman.jar
+RUN mkdir -p /opt/profiler && \
+    cd /opt/profiler && \
+    curl -L https://github.com/jvm-profiling-tools/async-profiler/releases/download/v1.5/async-profiler-1.5-linux-x64.tar.gz | tar xvz
+ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk
+ENV PATH=$PATH:/opt/hadoop/bin:$JAVA_HOME/bin
+RUN groupadd --gid 1000 hadoop && \
+    useradd --uid 1000 --gid 100 --groups 1000 --home /opt/hadoop hadoop && \
+    echo "hadoop ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+    chown hadoop:users /opt
+ADD scripts /opt/scripts
+ADD scripts/krb5.conf /etc/krb5.conf
+RUN mkdir -p /etc/hadoop /var/log/hadoop && \
+    chmod 1777 /etc/hadoop /var/log/hadoop && \
+    chown -R hadoop:users /opt/hadoop /var/log/hadoop
+ENV HADOOP_LOG_DIR=/var/log/hadoop
+ENV HADOOP_CONF_DIR=/etc/hadoop
+WORKDIR /opt/hadoop
+VOLUME /data
+USER hadoop
+ENTRYPOINT ["/usr/local/bin/dumb-init", "--", "/opt/scripts/starter.sh"]

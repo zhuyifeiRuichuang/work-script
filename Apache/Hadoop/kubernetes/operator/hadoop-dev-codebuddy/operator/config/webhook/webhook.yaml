@@ -1,0 +1,98 @@
+# Webhook Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-operator-webhook-service
+  namespace: hadoop-system
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+spec:
+  ports:
+    - port: 443
+      targetPort: 9443
+      name: webhook-server
+  selector:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+---
+# ValidatingWebhookConfiguration
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: hadoop-operator-validating-webhook
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+webhooks:
+  - name: vhadoopcluster.kb.io
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        name: hadoop-operator-webhook-service
+        namespace: hadoop-system
+        path: /validate-hadoop-kubedoop-dev-v1-hadoopcluster
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - hadoop.kubedoop.dev
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - hadoopclusters
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10
+---
+# MutatingWebhookConfiguration
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: hadoop-operator-mutating-webhook
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+webhooks:
+  - name: mhadoopcluster.kb.io
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        name: hadoop-operator-webhook-service
+        namespace: hadoop-system
+        path: /mutate-hadoop-kubedoop-dev-v1-hadoopcluster
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - hadoop.kubedoop.dev
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - hadoopclusters
+        scope: Namespaced
+    sideEffects: None
+    timeoutSeconds: 10
+---
+# Secret for webhook certificate (self-signed for development)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hadoop-operator-webhook-cert
+  namespace: hadoop-system
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+type: kubernetes.io/tls
+data:
+  # Generate actual certificate in production using cert-manager or external CA
+  # This is a placeholder - replace with actual cert in production
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWU0Z0F3SUJBZ0lVZFlNRzVFS1p1Zkl4R1JrV0pLYVBJQUtDZ01CMEdBMVVFQ2dNVUIzbHVNUmtCCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0=
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCnBsZWFzZSByZXBsYWNlIHdpdGggYWN0dWFsIGNlcnRpZmljYXRlIGluIHByb2R1Y3Rpb24=

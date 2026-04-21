@@ -1,0 +1,27 @@
+
+services:
+  redis:
+  # 镜像说明：https://hub.docker.com/_/redis
+    image: redis:8.6.2
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "123456", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+    command: >
+      redis-server
+      --bind 0.0.0.0
+      --requirepass 123456
+      --protected-mode no
+      --appendonly yes
+
+volumes:
+  redis-data:
+    name: redis-data

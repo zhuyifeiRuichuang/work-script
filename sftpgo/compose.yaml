@@ -1,0 +1,40 @@
+services:
+  sftpgo:
+    image: drakkan/sftpgo:2.7.x-plugins
+    container_name: sftpgo
+    restart: always
+    ports:
+      # web管理界面
+      - "8080:8080"
+      # sfp
+      - "2022:2022"
+      # ftp
+      - "2023:2023"
+      # 用于反向会话
+      - "50000-50100:50000-50100"
+    volumes:
+      - sftpgo-data:/srv/sftpgo/data
+      - sftpgo-home:/var/lib/sftpgo
+      - sftpgo-backup:/srv/sftpgo/backups
+      - ./sftpgo.json:/etc/sftpgo/sftpgo.json
+    networks:
+      - sftpgo
+    healthcheck:
+      test: ["CMD", "sftpgo", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  sftpgo:
+    name: sftpgo
+    driver: bridge
+
+volumes:
+  sftpgo-data:
+    name: sftpgo-data
+  sftpgo-home:
+    name: sftpgo-home
+  sftpgo-backup:
+    name: sftpgo-backup

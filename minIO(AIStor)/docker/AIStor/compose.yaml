@@ -1,0 +1,30 @@
+# 注意，将本文件放在期望存储数据的目录，先创建目录 mkdir {data,certs}   ，获取minio.license在当前目录，再部署以下资源。
+
+services:
+  aistor-server:
+    image: quay.io/minio/aistor/minio:latest
+    container_name: aistor-server
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+    # 在本地目录管理困难场景，data可替换为数据卷
+      - ./data:/mnt/data
+      - ./minio.license:/minio.license
+      - ./certs:/etc/minio/certs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    command: minio server /mnt/data --license /minio.license
+#volumes:
+#  aistor-data:
+#    name: aistor-data

@@ -1,0 +1,427 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# permissions to do leader election.
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: hadoop-operator
+    app.kubernetes.io/name: namespace
+    app.kubernetes.io/instance: hadoop
+    app.kubernetes.io/component: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+  name: hadoop
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: role
+    app.kubernetes.io/instance: leader-election-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: leader-election-role
+  namespace: hadoop
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: rolebinding
+    app.kubernetes.io/instance: leader-election-rolebinding
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: leader-election-rolebinding
+  namespace: hadoop
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: leader-election-role
+subjects:
+  - kind: ServiceAccount
+    name: hadoop-operator
+    namespace: hadoop
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: hadoop-operator-cluster-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: hadoop-operator-cluster-role
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - services
+      - configmaps
+      - persistentvolumeclaims
+      - pods
+      - endpoints
+      - secrets
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets/status
+    verbs:
+      - get
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - hadoop.apache.org
+    resources:
+      - hadoopclusters
+      - hadoopclusters/status
+      - hadoopclusters/finalizers
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+      - rolebindings
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrolebinding
+    app.kubernetes.io/instance: hadoop-operator-rolebinding
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: hadoop-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hadoop-operator-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: hadoop-operator
+    namespace: hadoop
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: serviceaccount
+    app.kubernetes.io/instance: controller-hadoop-operator-sa
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: hadoop-operator
+  namespace: hadoop
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    app.kubernetes.io/name: validatingwebhookconfiguration
+    app.kubernetes.io/instance: hadoop-operator-validate-webhook
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: hadoop-operator-validate-webhook
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: hadoop-operator-service
+        namespace: hadoop
+        path: /validate-hadoop-apache-org-v1alpha1-hadoopcluster
+    failurePolicy: Ignore
+    name: vhadoopcluster.kb.io
+    rules:
+      - apiGroups:
+          - hadoop.apache.org
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - hadoopclusters
+    sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  labels:
+    app.kubernetes.io/name: mutatingwebhookconfiguration
+    app.kubernetes.io/instance: hadoop-operator-mutate-webhook
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: hadoop-operator-mutate-webhook
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: hadoop-operator-service
+        namespace: hadoop
+        path: /mutate-hadoop-apache-org-v1alpha1-hadoopcluster
+    failurePolicy: Ignore
+    name: mhadoopcluster.kb.io
+    rules:
+      - apiGroups:
+          - hadoop.apache.org
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - hadoopclusters
+    sideEffects: None
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hadoop-operator-secret-cert
+  namespace: hadoop
+  labels:
+    control-plane: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+  name: hadoop-operator-service
+  namespace: hadoop
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 9443
+  selector:
+    control-plane: hadoop-operator
+    app.kubernetes.io/name: deployment
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hadoop-operator
+  namespace: hadoop
+  labels:
+    control-plane: hadoop-operator
+    app.kubernetes.io/name: deployment
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/created-by: hadoop-operator
+    app.kubernetes.io/part-of: hadoop-operator
+spec:
+  selector:
+    matchLabels:
+      control-plane: hadoop-operator
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: hadoop-operator
+      labels:
+        control-plane: hadoop-operator
+        app.kubernetes.io/name: deployment
+        app.kubernetes.io/instance: hadoop-operator
+        app.kubernetes.io/created-by: hadoop-operator
+        app.kubernetes.io/part-of: hadoop-operator
+    spec:
+      # TODO(user): Uncomment the following code to configure the nodeAffinity expression
+      # according to the platforms which are supported by your solution.
+      # It is considered best practice to support multiple architectures. You can
+      # build your manager image using the makefile target docker-buildx.
+      # affinity:
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #         - matchExpressions:
+      #           - key: kubernetes.io/arch
+      #             operator: In
+      #             values:
+      #               - amd64
+      #               - arm64
+      #               - ppc64le
+      #               - s390x
+      #           - key: kubernetes.io/os
+      #             operator: In
+      #             values:
+      #               - linux
+      securityContext:
+        runAsNonRoot: true
+        # TODO(user): For common cases that do not require escalating privileges
+        # it is recommended to ensure that all your Pods/Containers are restrictive.
+        # More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
+        # Please uncomment the following code if your project does NOT have to work on old Kubernetes
+        # versions < 1.19 or on vendors versions which do NOT support this field by default (i.e. Openshift < 4.11 ).
+        # seccompProfile:
+        #   type: RuntimeDefault
+      containers:
+        - command:
+            - /hadoopoperator
+          args:
+            - --leader-elect
+          image: hadoop-operator:v1.0.0
+          imagePullPolicy: IfNotPresent
+          name: hadoopoperator
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+          env:
+            - name: ENABLE_WEBHOOK
+              value: "false"
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OPERATOR_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SERVICE_NAME
+              value: hadoop-operator-service
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # TODO(user): Configure the resources accordingly based on the project requirements.
+          # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+            requests:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - mountPath:  /tmp/k8s-webhook-server/serving-certs
+              name: cert
+              readOnly: true
+      # imagePullSecrets:
+      #   - name: my-registry-key
+      volumes:
+        - name: cert
+          secret:
+            defaultMode: 420
+            secretName: hadoop-operator-secret-cert
+      serviceAccountName: hadoop-operator
+      terminationGracePeriodSeconds: 10

@@ -1,0 +1,6 @@
+# Kustomization for Hadoop Cluster examples
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - hadoopcluster-simple.yaml

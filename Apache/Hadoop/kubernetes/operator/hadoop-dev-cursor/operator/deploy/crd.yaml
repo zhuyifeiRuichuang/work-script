@@ -1,0 +1,26 @@
+# kubectl apply -f crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: hadoopclusters.data.hadoop.org
+spec:
+  group: data.hadoop.org
+  scope: Namespaced
+  names:
+    plural: hadoopclusters
+    singular: hadoopcluster
+    kind: HadoopCluster
+    shortNames:
+      - hdc
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: 期望的 Hadoop 集群拓扑与存储/镜像等配置（v1alpha1 允许未知字段以便迭代）。
+              x-kubernetes-preserve-unknown-fields: true

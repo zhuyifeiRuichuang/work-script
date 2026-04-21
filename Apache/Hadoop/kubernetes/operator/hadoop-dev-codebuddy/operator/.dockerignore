@@ -1,0 +1,44 @@
+# Binaries for program and plugins
+*.o
+*.so
+*.exe
+*.exe~
+*.dll
+*.dylib
+bin/
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+*.tgz
+
+# Kubernetes
+kubeconfig
+
+# Logs
+*.log
+logs/

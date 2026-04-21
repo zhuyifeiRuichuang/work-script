@@ -1,0 +1,410 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: hadoopclusters.hadoop.apache.org
+spec:
+  group: hadoop.apache.org
+  names:
+    kind: HadoopCluster
+    listKind: HadoopClusterList
+    plural: hadoopclusters
+    shortNames:
+    - hc
+    singular: hadoopcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: HadoopCluster is the Schema for the hadoopclusters API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object.'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents.'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: HadoopClusterSpec defines the desired state of HadoopCluster
+            properties:
+              config:
+                description: Configuration overrides for Hadoop
+                properties:
+                  capacityScheduler:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  coreSite:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  hdfsSite:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  mapredSite:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  yarnSite:
+                    additionalProperties:
+                      type: string
+                    type: object
+                type: object
+              hdfs:
+                description: HDFS configuration
+                properties:
+                  dataNode:
+                    properties:
+                      affinity:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      replicas:
+                        type: integer
+                      resources:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      service:
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          nodePorts:
+                            additionalProperties:
+                              type: integer
+                            type: object
+                          type:
+                            type: string
+                        type: object
+                      storage:
+                        properties:
+                          accessMode:
+                            type: string
+                          size:
+                            type: string
+                          storageClassName:
+                            type: string
+                        type: object
+                      tolerations:
+                        items:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        type: array
+                    type: object
+                  nameNode:
+                    properties:
+                      affinity:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      ha:
+                        properties:
+                          enabled:
+                            type: boolean
+                          journalNode:
+                            properties:
+                              replicas:
+                                type: integer
+                              resources:
+                                type: object
+                                x-kubernetes-preserve-unknown-fields: true
+                              storage:
+                                properties:
+                                  accessMode:
+                                    type: string
+                                  size:
+                                    type: string
+                                  storageClassName:
+                                    type: string
+                                type: object
+                            type: object
+                          zookeeper:
+                            properties:
+                              connectionString:
+                                type: string
+                            type: object
+                        type: object
+                      replicas:
+                        type: integer
+                      resources:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      service:
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          nodePorts:
+                            additionalProperties:
+                              type: integer
+                            type: object
+                          type:
+                            type: string
+                        type: object
+                      storage:
+                        properties:
+                          accessMode:
+                            type: string
+                          size:
+                            type: string
+                          storageClassName:
+                            type: string
+                        type: object
+                      tolerations:
+                        items:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        type: array
+                    type: object
+                type: object
+              image:
+                description: Image defines the Hadoop Docker image to use
+                properties:
+                  pullPolicy:
+                    type: string
+                  pullSecrets:
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                  repository:
+                    type: string
+                  tag:
+                    type: string
+                type: object
+              metrics:
+                description: Metrics and monitoring configuration
+                properties:
+                  enabled:
+                    type: boolean
+                  exporterImage:
+                    type: string
+                  serviceMonitor:
+                    properties:
+                      enabled:
+                        type: boolean
+                      interval:
+                        type: string
+                      labels:
+                        additionalProperties:
+                          type: string
+                        type: object
+                    type: object
+                type: object
+              security:
+                description: Security configuration
+                properties:
+                  kerberos:
+                    properties:
+                      adminServer:
+                        type: string
+                      enabled:
+                        type: boolean
+                      kdc:
+                        type: string
+                      keytabSecret:
+                        type: string
+                      realm:
+                        type: string
+                    type: object
+                  ranger:
+                    properties:
+                      adminURL:
+                        type: string
+                      enabled:
+                        type: boolean
+                    type: object
+                  tls:
+                    properties:
+                      certificateSecret:
+                        type: string
+                      enabled:
+                        type: boolean
+                    type: object
+                type: object
+              yarn:
+                description: YARN configuration
+                properties:
+                  nodeManager:
+                    properties:
+                      affinity:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      replicas:
+                        type: integer
+                      resources:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      service:
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          nodePorts:
+                            additionalProperties:
+                              type: integer
+                            type: object
+                          type:
+                            type: string
+                        type: object
+                      tolerations:
+                        items:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        type: array
+                    type: object
+                  resourceManager:
+                    properties:
+                      affinity:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      ha:
+                        properties:
+                          enabled:
+                            type: boolean
+                          journalNode:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          zookeeper:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                      replicas:
+                        type: integer
+                      resources:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      service:
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          nodePorts:
+                            additionalProperties:
+                              type: integer
+                            type: object
+                          type:
+                            type: string
+                        type: object
+                      tolerations:
+                        items:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                        type: array
+                    type: object
+                type: object
+            type: object
+          status:
+            description: HadoopClusterStatus defines the observed state of HadoopCluster
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the cluster state
+                items:
+                  description: ClusterCondition describes the state of a cluster at
+                    a certain point
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              dataNode:
+                description: DataNode status
+                properties:
+                  deadNodes:
+                    description: Dead nodes count
+                    type: integer
+                  liveNodes:
+                    description: Live nodes count
+                    type: integer
+                  readyReplicas:
+                    description: Ready replicas
+                    type: integer
+                  replicas:
+                    description: Total replicas
+                    type: integer
+                type: object
+              nameNode:
+                description: NameNode status
+                properties:
+                  active:
+                    description: Active NameNode
+                    type: string
+                  readyReplicas:
+                    description: Ready replicas
+                    type: integer
+                  replicas:
+                    description: Total replicas
+                    type: integer
+                  standby:
+                    description: Standby NameNodes
+                    items:
+                      type: string
+                    type: array
+                type: object
+              nodeManager:
+                description: NodeManager status
+                properties:
+                  readyReplicas:
+                    description: Ready replicas
+                    type: integer
+                  replicas:
+                    description: Total replicas
+                    type: integer
+                type: object
+              phase:
+                description: Phase represents the current phase of the cluster
+                type: string
+              resourceManager:
+                description: ResourceManager status
+                properties:
+                  active:
+                    description: Active ResourceManager
+                    type: string
+                  readyReplicas:
+                    description: Ready replicas
+                    type: integer
+                  replicas:
+                    description: Total replicas
+                    type: integer
+                  standby:
+                    description: Standby ResourceManagers
+                    items:
+                      type: string
+                    type: array
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

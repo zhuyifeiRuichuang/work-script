@@ -1,0 +1,8 @@
+# Namespace for Hadoop clusters
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hadoop-cluster
+  labels:
+    app.kubernetes.io/name: hadoop
+    app.kubernetes.io/instance: hadoop-cluster

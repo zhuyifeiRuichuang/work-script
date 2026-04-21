@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<configuration>
+    <!-- 块大小设置 -->
+    <property>
+        <name>dfs.blocksize</name>
+        <value>134217728</value>
+        <description>HDFS块大小：128MB</description>
+    </property>
+
+    <!-- 副本数 -->
+    <property>
+        <name>dfs.replication</name>
+        <value>3</value>
+        <description>默认副本数</description>
+    </property>
+
+    <!-- NameNode 数据目录 -->
+    <property>
+        <name>dfs.namenode.name.dir</name>
+        <value>file:///opt/hadoop/data/nn</value>
+        <description>NameNode元数据存储目录</description>
+    </property>
+
+    <!-- DataNode 数据目录 -->
+    <property>
+        <name>dfs.datanode.data.dir</name>
+        <value>file:///opt/hadoop/data/dn</value>
+        <description>DataNode数据存储目录</description>
+    </property>
+
+    <!-- NameNode Web UI -->
+    <property>
+        <name>dfs.namenode.http-address</name>
+        <value>0.0.0.0:9870</value>
+    </property>
+
+    <property>
+        <name>dfs.namenode.https-address</name>
+        <value>0.0.0.0:9871</value>
+    </property>
+
+    <!-- DataNode Web UI -->
+    <property>
+        <name>dfs.datanode.http.address</name>
+        <value>0.0.0.0:9864</value>
+    </property>
+
+    <!-- 权限检查 -->
+    <property>
+        <name>dfs.permissions.enabled</name>
+        <value>true</value>
+    </property>
+
+    <!-- WebHDFS -->
+    <property>
+        <name>dfs.webhdfs.enabled</name>
+        <value>true</value>
+    </property>
+
+    <!-- 安全模式设置 -->
+    <property>
+        <name>dfs.namenode.safemode.threshold-pct</name>
+        <value>0.999f</value>
+    </property>
+
+    <!-- 心跳设置 -->
+    <property>
+        <name>dfs.heartbeat.interval</name>
+        <value>3</value>
+    </property>
+
+    <!-- 块报告间隔 -->
+    <property>
+        <name>dfs.blockreport.intervalMsec</name>
+        <value>21600000</value>
+    </property>
+
+    <!-- 高可用配置（由Operator动态配置） -->
+    <!--
+    <property>
+        <name>dfs.nameservices</name>
+        <value>mycluster</value>
+    </property>
+
+    <property>
+        <name>dfs.ha.namenodes.mycluster</name>
+        <value>nn1,nn2</value>
+    </property>
+    -->
+
+    <!-- JournalNode 设置（HA模式） -->
+    <property>
+        <name>dfs.journalnode.edits.dir</name>
+        <value>/opt/hadoop/data/jn</value>
+    </property>
+
+    <!-- 容错设置 -->
+    <property>
+        <name>dfs.namenode.checkpoint.period</name>
+        <value>3600</value>
+    </property>
+
+    <property>
+        <name>dfs.namenode.checkpoint.txns</name>
+        <value>1000000</value>
+    </property>
+</configuration>

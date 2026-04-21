@@ -1,0 +1,80 @@
+apiVersion: hadoop.apache.org/v1
+kind: HadoopCluster
+metadata:
+  name: hadoop-sample
+  # 请手动指定 namespace
+  # namespace: <your-namespace>
+spec:
+  image:
+    repository: apache/hadoop
+    tag: "3.3.6"
+    pullPolicy: IfNotPresent
+  
+  hdfs:
+    nameNode:
+      replicas: 1
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1000m"
+      storage:
+        size: "50Gi"
+        storageClassName: standard
+      service:
+        type: NodePort
+        nodePorts:
+          web: 30070
+          rpc: 30090
+    
+    dataNode:
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1000m"
+      storage:
+        size: "200Gi"
+        storageClassName: standard
+  
+  yarn:
+    resourceManager:
+      replicas: 1
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1000m"
+      service:
+        type: NodePort
+        nodePorts:
+          web: 30088
+    
+    nodeManager:
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1000m"
+  
+  config:
+    coreSite:
+      "hadoop.tmp.dir": "/opt/hadoop/tmpdata"
+      "fs.defaultFS": "hdfs://hadoop-sample-namenode-0.hadoop-sample-namenode.default.svc.cluster.local:9000"
+    hdfsSite:
+      "dfs.replication": "3"
+      "dfs.permissions.enabled": "false"
+      "dfs.webhdfs.enabled": "true"
+    yarnSite:
+      "yarn.nodemanager.pmem-check-enabled": "false"
+      "yarn.nodemanager.vmem-check-enabled": "false"

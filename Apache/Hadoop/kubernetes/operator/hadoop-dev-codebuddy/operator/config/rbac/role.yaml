@@ -1,0 +1,252 @@
+# ServiceAccount for Hadoop Operator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hadoop-operator
+  namespace: hadoop-system
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/component: rbac
+---
+# Role for leader election
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hadoop-operator-leader-election-role
+  namespace: hadoop-system
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+# RoleBinding for leader election
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hadoop-operator-leader-election-rolebinding
+  namespace: hadoop-system
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hadoop-operator-leader-election-role
+subjects:
+  - kind: ServiceAccount
+    name: hadoop-operator
+    namespace: hadoop-system
+---
+# ClusterRole for Hadoop Operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hadoop-operator
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/component: rbac
+rules:
+  # HadoopCluster CRD
+  - apiGroups:
+      - hadoop.kubedoop.dev
+    resources:
+      - hadoopclusters
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - hadoop.kubedoop.dev
+    resources:
+      - hadoopclusters/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - hadoop.kubedoop.dev
+    resources:
+      - hadoopclusters/finalizers
+    verbs:
+      - update
+  # StatefulSets
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets/status
+    verbs:
+      - get
+  # Services
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # ConfigMaps
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # ServiceAccounts
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # PersistentVolumeClaims
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Secrets (for Kerberos keytabs)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Pods (for monitoring)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  # Events
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  # Namespaces
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  # Nodes (for scheduling)
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+  # Endpoints
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs:
+      - get
+      - list
+      - watch
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hadoop-operator-rolebinding
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+    app.kubernetes.io/instance: hadoop-operator
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hadoop-operator
+subjects:
+  - kind: ServiceAccount
+    name: hadoop-operator
+    namespace: hadoop-system

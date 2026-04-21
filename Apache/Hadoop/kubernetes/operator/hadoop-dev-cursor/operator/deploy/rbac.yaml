@@ -1,0 +1,48 @@
+# 集群级：可监听任意命名空间内的 HadoopCluster 并在对应命名空间创建工作负载。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hadoop-operator-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hadoop-operator
+  namespace: hadoop-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hadoop-operator
+rules:
+  - apiGroups: ["data.hadoop.org"]
+    resources: ["hadoopclusters"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hadoop-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hadoop-operator
+subjects:
+  - kind: ServiceAccount
+    name: hadoop-operator
+    namespace: hadoop-operator-system

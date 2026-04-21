@@ -1,0 +1,286 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Custom Configuration Hadoop Cluster
+# This YAML demonstrates advanced configuration options
+apiVersion: hadoop.kubedoop.dev/v1
+kind: HadoopCluster
+metadata:
+  name: hadoop-custom
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoop-custom
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/component: hadoop-cluster
+spec:
+  # Global image configuration
+  image: my-registry.example.com/hadoop:3.4.1
+  imagePullPolicy: Always
+  imagePullSecrets:
+    - regcred
+  serviceAccountName: hadoop-operator
+
+  # NameNode Configuration
+  nameNodeSpec:
+    replicas: 2
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                hadoop.kubedoop.dev/component: namenode
+            topologyKey: kubernetes.io/hostname
+    resources:
+      limits:
+        cpu: "4"
+        memory: 8Gi
+      requests:
+        cpu: "2"
+        memory: 4Gi
+    storage:
+      storageClassName: fast-ssd
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Gi
+    nodeSelector:
+      node-type: hadoop-master
+    tolerations:
+      - key: "node-type"
+        operator: "Equal"
+        value: "hadoop-master"
+        effect: "NoSchedule"
+    annotations:
+      description: "Hadoop NameNode for production"
+    ports:
+      rpcPort: 9000
+      httpPort: 9870
+
+  # DataNode Configuration
+  dataNodeSpec:
+    replicas: 10
+    volumesPerNode: 2
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  hadoop.kubedoop.dev/component: datanode
+              topologyKey: kubernetes.io/hostname
+    resources:
+      limits:
+        cpu: "8"
+        memory: 32Gi
+        ephemeral-storage: 100Gi
+      requests:
+        cpu: "4"
+        memory: 16Gi
+        ephemeral-storage: 50Gi
+    storage:
+      storageClassName: fast-ssd
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 500Gi
+    nodeSelector:
+      node-type: hadoop-worker
+    tolerations:
+      - key: "node-type"
+        operator: "Equal"
+        value: "hadoop-worker"
+        effect: "NoSchedule"
+    annotations:
+      description: "Hadoop DataNode for production"
+    ports:
+      dataPort: 9866
+      ipcPort: 9867
+      httpPort: 9864
+
+  # ResourceManager Configuration
+  resourceManagerSpec:
+    replicas: 2
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                hadoop.kubedoop.dev/component: resourcemanager
+            topologyKey: kubernetes.io/hostname
+    resources:
+      limits:
+        cpu: "4"
+        memory: 8Gi
+      requests:
+        cpu: "2"
+        memory: 4Gi
+    nodeSelector:
+      node-type: hadoop-master
+    tolerations:
+      - key: "node-type"
+        operator: "Equal"
+        value: "hadoop-master"
+        effect: "NoSchedule"
+    serviceType: LoadBalancer
+    ports:
+      rpcPort: 8032
+      httpPort: 8088
+      httpsPort: 8090
+
+  # NodeManager Configuration
+  nodeManagerSpec:
+    replicas: 10
+    resources:
+      limits:
+        cpu: "8"
+        memory: 32Gi
+        ephemeral-storage: 100Gi
+      requests:
+        cpu: "4"
+        memory: 16Gi
+        ephemeral-storage: 50Gi
+    nodeSelector:
+      node-type: hadoop-worker
+    tolerations:
+      - key: "node-type"
+        operator: "Equal"
+        value: "hadoop-worker"
+        effect: "NoSchedule"
+    env:
+      - name: YARN_NODEMANAGER_OPTS
+        value: "-Xmx8192m"
+    annotations:
+      description: "Hadoop NodeManager for production"
+
+  # Configuration specification
+  configSpec:
+    configMapName: custom-hadoop-config
+    logDir: /opt/hadoop/logs
+    dataDir: /data/hadoop
+    hadoopEnv:
+      HDFS_HEAPSIZE: "8192"
+      YARN_HEAPSIZE: "4096"
+      HADOOP_OPTS: "-Djava.net.preferIPv4Stack=true -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+      HADOOP_DATANODE_OPTS: "-Xmx4096m"
+      HADOOP_NAMENODE_OPTS: "-Xmx4096m"
+      YARN_RESOURCEMANAGER_OPTS: "-Xmx2048m"
+      YARN_NODEMANAGER_OPTS: "-Xmx8192m"
+    # Custom core-site properties
+    coreSite:
+      fs.defaultFS: "hdfs://hadoop-custom-namenode:9000"
+      hadoop.tmp.dir: "/tmp/hadoop"
+      ha.zookeeper.quorum: "zk-svc:2181"
+      hadoop.http.staticuser.user: "root"
+      hadoop.proxyuser.root.hosts: "*"
+      hadoop.proxyuser.root.groups: "*"
+      fs.trash.interval: "1440"
+      io.file.buffer.size: "131072"
+    # Custom hdfs-site properties
+    hdfsSite:
+      dfs.replication: "3"
+      dfs.replication.max: "5"
+      dfs.blocksize: "134217728"
+      dfs.namenode.name.dir: "file:///data/hadoop/namenode"
+      dfs.datanode.data.dir: "file:///data/hadoop/datanode"
+      dfs.permissions.enabled: "false"
+      dfs.webhdfs.enabled: "true"
+      dfs.datanode.hdfs-blocks-metadata.enabled: "true"
+      dfs.permissions.superusergroup: "root"
+      dfs.namenode.handler.count: "64"
+      dfs.datanode.handler.count: "32"
+      dfs.namenode.accesstime.precision: "0"
+      dfs.datanode.sync.behind.writes: "true"
+      dfs.client.read.shortcircuit: "true"
+      dfs.client.read.shortcircuit.streams.cache.size: "4096"
+      dfs.domain.socket.path: "/var/run/hadoop-hdfs/dn._PORT_"
+    # Custom yarn-site properties
+    yarnSite:
+      yarn.resourcemanager.scheduler.class: "org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler"
+      yarn.resourcemanager.scheduler.fair.allocation.file: "/opt/hadoop/etc/hadoop/fair-scheduler.xml"
+      yarn.resourcemanager.scheduler.fair.user-as-default-queue: "true"
+      yarn.resourcemanager.scheduler.fair.pool-name-property: "pool.name"
+      yarn.scheduler.fair.allow-undeclared-pools: "true"
+      yarn.nodemanager.resource.memory-mb: "32768"
+      yarn.nodemanager.resource.cpu-vcores: "8"
+      yarn.nodemanager.vmem-check-enabled: "false"
+      yarn.nodemanager.pmem-check-enabled: "false"
+      yarn.nodemanager.resource.detect-hardware-capabilities: "true"
+      yarn.scheduler.minimum-allocation-mb: "2048"
+      yarn.scheduler.maximum-allocation-mb: "32768"
+      yarn.scheduler.minimum-allocation-vcores: "1"
+      yarn.scheduler.maximum-allocation-vcores: "8"
+      yarn.nodemanager.aux-services: "mapreduce_shuffle"
+      yarn.nodemanager.aux-services.mapreduce_shuffle.class: "org.apache.hadoop.mapred.ShuffleHandler"
+      yarn.app.mapreduce.am.scheduler.connection.wait.interval-ms: "5000"
+      yarn.nodemanager.localizer.client.thread-count: "5"
+      yarn.nodemanager.localizer.fetch.thread-count: "4"
+    # Custom mapred-site properties
+    mapredSite:
+      mapreduce.framework.name: "yarn"
+      mapreduce.application.classpath: "$HADOOP_MAPRED_HOME/share/hadoop/mapreduce/*:$HADOOP_MAPRED_HOME/share/hadoop/mapreduce/lib/*"
+      mapreduce.jobhistory.address: "0.0.0.0:10020"
+      mapreduce.jobhistory.webapp.address: "0.0.0.0:19888"
+      mapreduce.jobhistory.intermediate-done-dir: "/mr-history/intermediate"
+      mapreduce.jobhistory.done-dir: "/mr-history/done"
+      mapreduce.map.memory.mb: "4096"
+      mapreduce.reduce.memory.mb: "8192"
+      mapreduce.map.java.opts: "-Xmx3276m"
+      mapreduce.reduce.java.opts: "-Xmx6553m"
+      mapreduce.map.sort.spill.percent: "0.8"
+      mapreduce.reduce.shuffle.merge.percent: "0.8"
+      mapreduce.task.io.sort.factor: "100"
+      mapreduce.task.io.sort.mb: "512"
+      mapreduce.jobtracker.handler.count: "64"
+      mapreduce.job.reuse.jvm.num.tasks: "-1"
+      mapreduce.speculative: "false"
+      yarn.app.mapreduce.am.resource.mb: "4096"
+      yarn.app.mapreduce.am.command-opts: "-Xmx3276m"
+
+  # High Availability Configuration
+  ha:
+    nameNodeHA:
+      enabled: true
+      nameServiceId: ns1
+      journalClusterId: jc1
+      replicas: 2
+    resourceManagerHA:
+      enabled: true
+      clusterId: rm-cluster
+      replicas: 2
+
+  # Federation Configuration (optional, for multi-nameservice)
+  # federation:
+  #   enabled: true
+  #   nameServiceId: ns1
+  #   blockPoolId: bp1
+
+  # Security Configuration (Kerberos)
+  # hadoopSecurity:
+  #   enabled: true
+  #   kerberos:
+  #     enabled: true
+  #     realm: EXAMPLE.COM
+  #     kdcHost: kdc.example.com
+  #     kdcPort: 88
+  #     adminPrincipal: admin/admin@EXAMPLE.COM
+  #     keytabSecret:
+  #       name: hadoop-keytab
+  #       namespace: default
+  #     krb5ConfMapName: krb5-conf

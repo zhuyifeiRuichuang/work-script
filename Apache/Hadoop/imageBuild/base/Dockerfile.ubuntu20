@@ -1,0 +1,45 @@
+FROM ubuntu:20.04
+ENV DEBIAN_FRONTEND=noninteractive
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+ENV PATH=$PATH:/opt/hadoop/bin
+ENV HADOOP_LOG_DIR=/var/log/hadoop
+ENV HADOOP_CONF_DIR=/etc/hadoop
+RUN apt-get update && apt-get install -y \
+    sudo \
+    python2 \
+    wget \
+    curl \
+    netcat-openbsd \
+    jq \
+    openjdk-8-jdk \
+    krb5-user \
+    tar \
+    gzip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+RUN wget https://bootstrap.pypa.io/pip/2.7/get-pip.py && \
+    python2 get-pip.py && \
+    rm -rf get-pip.py
+RUN pip2 install robotframework
+RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64 && \
+    chmod +x /usr/local/bin/dumb-init
+RUN mkdir -p /etc/security/keytabs && \
+    chmod -R a+wr /etc/security/keytabs
+RUN wget -O /opt/byteman.jar https://repo.maven.apache.org/maven2/org/jboss/byteman/byteman/4.0.4/byteman-4.0.4.jar && \
+    chmod o+r /opt/byteman.jar
+RUN mkdir -p /opt/profiler && \
+    cd /opt/profiler && \
+    curl -L https://github.com/jvm-profiling-tools/async-profiler/releases/download/v1.5/async-profiler-1.5-linux-x64.tar.gz | tar xvz
+RUN groupadd --gid 1000 hadoop && \
+    useradd --uid 1000 --gid 100 --home /opt/hadoop --shell /bin/bash hadoop && \
+    echo "hadoop ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+    chown -R hadoop:hadoop /opt && \
+    mkdir -p /etc/hadoop /var/log/hadoop && \
+    chmod 1777 /etc/hadoop && \
+    chmod 1777 /var/log/hadoop
+ADD scripts /opt/
+ADD scripts/krb5.conf /etc/
+WORKDIR /opt/hadoop
+VOLUME /data
+USER hadoop
+ENTRYPOINT ["/usr/local/bin/dumb-init", "--", "/opt/starter.sh"]

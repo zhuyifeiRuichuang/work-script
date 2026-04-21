@@ -1,0 +1,47 @@
+# 仅用于3.2.0版本。其他版本必须重新测试。
+
+volumes:
+  nacos-logs:
+    name: nacos-logs
+  mysql-nacos-data:
+    name: mysql-nacos-data
+
+services:
+  nacos:
+    image: nacos/nacos-server:v3.2.0
+    container_name: nacos
+    env_file:
+      - ./nacos.env
+    volumes:
+      - nacos1-logs:/home/nacos/logs
+    ports:
+      - "7848:7848"
+      - "8080:8080"
+      - "8848:8848"
+      - "9868:9848"
+      - "9850:9849"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: always
+
+  mysql:
+    container_name: mysql-nacos
+    image: mysql:8.4.8
+    restart: always
+    env_file:
+      - ./mysql.env
+    volumes:
+      - mysql-nacos-data:/var/lib/mysql
+      # mysql-schema.sql来自https://nacos.io/download/nacos-server稳定版软件包中config目录
+      - ./mysql-schema.sql:/docker-entrypoint-initdb.d/mysql-schema.sql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 10s
+      retries: 10

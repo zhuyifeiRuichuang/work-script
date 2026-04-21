@@ -1,0 +1,50 @@
+# 离线环境：将镜像导入私有仓库后替换下面 image，并配合 imagePullSecrets（在 CR spec 中配置）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hadoop-operator
+  namespace: hadoop-operator-system
+  labels:
+    app.kubernetes.io/name: hadoop-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hadoop-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hadoop-operator
+    spec:
+      serviceAccountName: hadoop-operator
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          image: ghcr.io/REPLACE_ME/hadoop-operator:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

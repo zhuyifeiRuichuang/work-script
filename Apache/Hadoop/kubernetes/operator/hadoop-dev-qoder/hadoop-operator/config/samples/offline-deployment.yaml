@@ -1,0 +1,155 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# 离线部署配置示例
+# 此配置适用于私有镜像仓库和离线环境部署
+
+apiVersion: hadoop.apache.org/v1
+kind: HadoopCluster
+metadata:
+  name: hadoop-offline
+  # 请手动指定 namespace
+  # namespace: <your-namespace>
+spec:
+  # 使用私有镜像仓库配置
+  image:
+    repository: myregistry.example.com:5000/apache/hadoop
+    tag: "3.3.6"
+    pullPolicy: IfNotPresent
+    # 如果私有仓库需要认证，请创建相应的 Secret
+    pullSecrets:
+      - name: regcred
+  
+  hdfs:
+    nameNode:
+      replicas: 2
+      ha:
+        enabled: true
+        # 使用外部 ZooKeeper（如果已在离线环境部署）
+        zookeeper:
+          connectionString: "zk-0.zk-hsvc.default.svc.cluster.local:2181,zk-1.zk-hsvc.default.svc.cluster.local:2181,zk-2.zk-hsvc.default.svc.cluster.local:2181"
+        journalNode:
+          replicas: 3
+          storage:
+            size: "50Gi"
+            storageClassName: local
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+      storage:
+        size: "100Gi"
+        storageClassName: local
+      # Pod 反亲和性确保 NameNode 分布在不同节点
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - hadoop-namenode
+            topologyKey: kubernetes.io/hostname
+    
+    dataNode:
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+      storage:
+        size: "500Gi"
+        storageClassName: local
+  
+  yarn:
+    resourceManager:
+      replicas: 2
+      ha:
+        enabled: true
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - hadoop-resourcemanager
+            topologyKey: kubernetes.io/hostname
+    
+    nodeManager:
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+  
+  config:
+    coreSite:
+      "hadoop.tmp.dir": "/opt/hadoop/tmpdata"
+      "io.file.buffer.size": "131072"
+    hdfsSite:
+      "dfs.replication": "3"
+      "dfs.permissions.enabled": "false"
+      "dfs.webhdfs.enabled": "true"
+      "dfs.namenode.acls.enabled": "true"
+      "dfs.blocksize": "134217728"
+      "dfs.namenode.handler.count": "100"
+    yarnSite:
+      "yarn.nodemanager.pmem-check-enabled": "false"
+      "yarn.nodemanager.vmem-check-enabled": "false"
+      "yarn.scheduler.maximum-allocation-mb": "8192"
+      "yarn.scheduler.maximum-allocation-vcores": "4"
+      "yarn.nodemanager.resource.memory-mb": "8192"
+      "yarn.nodemanager.resource.cpu-vcores": "4"
+    mapredSite:
+      "mapreduce.job.maps": "10"
+      "mapreduce.job.reduces": "5"
+      "mapreduce.map.memory.mb": "2048"
+      "mapreduce.reduce.memory.mb": "4096"
+  
+  # 启用监控
+  metrics:
+    enabled: true
+    exporterImage: myregistry.example.com:5000/prometheus/hadoop-exporter:latest
+    serviceMonitor:
+      enabled: false  # 离线环境可能不需要 ServiceMonitor
+---
+# 创建镜像拉取 Secret 的示例（请替换 <your-namespace> 为实际 namespace）
+# kubectl create secret docker-registry regcred \
+#   --docker-server=myregistry.example.com:5000 \
+#   --docker-username=<username> \
+#   --docker-password=<password> \
+#   --docker-email=<email> \
+#   -n <your-namespace>

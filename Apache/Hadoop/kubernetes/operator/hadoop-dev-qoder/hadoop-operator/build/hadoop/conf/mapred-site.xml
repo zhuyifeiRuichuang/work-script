@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<configuration>
+    <!-- MapReduce 框架名称 -->
+    <property>
+        <name>mapreduce.framework.name</name>
+        <value>yarn</value>
+        <description>使用 YARN 作为 MapReduce 框架</description>
+    </property>
+
+    <!-- MapReduce 应用类路径 -->
+    <property>
+        <name>mapreduce.application.classpath</name>
+        <value>/opt/hadoop/share/hadoop/mapreduce/*:/opt/hadoop/share/hadoop/mapreduce/lib/*</value>
+    </property>
+
+    <!-- JobHistory Server 地址 -->
+    <property>
+        <name>mapreduce.jobhistory.address</name>
+        <value>0.0.0.0:10020</value>
+    </property>
+
+    <property>
+        <name>mapreduce.jobhistory.webapp.address</name>
+        <value>0.0.0.0:19888</value>
+    </property>
+
+    <!-- Map 任务内存 -->
+    <property>
+        <name>mapreduce.map.memory.mb</name>
+        <value>1024</value>
+    </property>
+
+    <property>
+        <name>mapreduce.map.java.opts</name>
+        <value>-Xmx819m</value>
+    </property>
+
+    <!-- Reduce 任务内存 -->
+    <property>
+        <name>mapreduce.reduce.memory.mb</name>
+        <value>2048</value>
+    </property>
+
+    <property>
+        <name>mapreduce.reduce.java.opts</name>
+        <value>-Xmx1638m</value>
+    </property>
+
+    <!-- 排序内存 -->
+    <property>
+        <name>mapreduce.task.io.sort.mb</name>
+        <value>256</value>
+    </property>
+
+    <!-- 任务超时 -->
+    <property>
+        <name>mapreduce.task.timeout</name>
+        <value>600000</value>
+    </property>
+
+    <!-- 推测执行 -->
+    <property>
+        <name>mapreduce.map.speculative</name>
+        <value>false</value>
+    </property>
+
+    <property>
+        <name>mapreduce.reduce.speculative</name>
+        <value>false</value>
+    </property>
+
+    <!-- 压缩设置 -->
+    <property>
+        <name>mapreduce.map.output.compress</name>
+        <value>true</value>
+    </property>
+
+    <property>
+        <name>mapreduce.map.output.compress.codec</name>
+        <value>org.apache.hadoop.io.compress.SnappyCodec</value>
+    </property>
+</configuration>

@@ -1,0 +1,252 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+    component: namenode
+spec:
+  ports:
+    - port: 9870
+      name: web
+    - port: 9000
+      name: rpc
+  clusterIP: None
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+spec:
+  serviceName: namenode
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  podManagementPolicy: Parallel
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+        component: namenode
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9870"
+    spec:
+      serviceAccountName: hadoop
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: hadoop-namenode
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: init-namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            echo "Step 1: Preparing directories and permissions..."
+            mkdir -p /opt/hadoop/data/nn
+            mkdir -p /opt/hadoop/data/nfs
+            
+            if id "hadoop" >/dev/null 2>&1; then
+              chown -R hadoop:hadoop /opt/hadoop/data
+            else
+              chown -R 1000:1000 /opt/hadoop/data
+            fi
+            chmod -R 755 /opt/hadoop/data
+            
+            echo "Step 2: Checking if NameNode needs formatting..."
+            if [ ! -f /opt/hadoop/data/nn/current/VERSION ]; then
+              echo "No VERSION file found. Ready for HA initialization."
+            else
+              echo "NameNode already formatted."
+              grep -i "clusterID" /opt/hadoop/data/nn/current/VERSION || true
+            fi
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+            subPath: nn
+          - name: hadoop-nfs-data
+            mountPath: /opt/hadoop/data/nfs
+            subPath: nfs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+      containers:
+      - name: namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            echo "Waiting for JournalNode to be ready..."
+            for i in $(seq 1 30); do
+              if nc -z journalnode-0.journalnode.hadoop 8485 2>/dev/null; then
+                echo "JournalNode is ready"
+                break
+              fi
+              echo "Waiting for JournalNode... ($i/30)"
+              sleep 2
+            done
+            echo "Starting NameNode in HA mode..."
+            exec hdfs namenode
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: HADOOP_HEAPSIZE
+            value: "4096"
+        ports:
+          - containerPort: 9870
+            name: web
+            protocol: TCP
+          - containerPort: 9000
+            name: rpc
+            protocol: TCP
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+            ephemeral-storage: "2Gi"
+          limits:
+            memory: "8Gi"
+            cpu: "2000m"
+            ephemeral-storage: "4Gi"
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              nc -z localhost 9870 || exit 1
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 4
+        livenessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - |
+                su hadoop -c "hdfs dfsadmin -safemode leave" || true
+                sleep 10
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+            subPath: nn
+          - name: hadoop-nfs-data
+            mountPath: /opt/hadoop/data/nfs
+            subPath: nfs
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+      - name: zkfc
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            echo "Starting ZKFC (Zookeeper Failover Controller)..."
+            exec hdfs zkfc -format
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+            ephemeral-storage: "500Mi"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+            ephemeral-storage: "1Gi"
+        volumeMounts:
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      nodeSelector:
+        hadoop-role: master
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-nn-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 20Gi
+  - metadata:
+      name: hadoop-nfs-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 10Gi

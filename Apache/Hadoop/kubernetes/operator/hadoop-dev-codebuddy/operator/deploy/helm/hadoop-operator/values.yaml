@@ -1,0 +1,147 @@
+# Default values for hadoop-operator.
+
+# Image configuration
+image:
+  repository: quay.io/kubedoop/hadoop-operator
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+# Number of replicas for the operator
+replicaCount: 1
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+
+# Image pull secrets for private registry
+imagePullSecrets: []
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# Pod configuration
+pod:
+  # Pod annotations
+  annotations: {}
+  # Pod labels
+  labels: {}
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+# Container security context
+container:
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# Resource limits and requests
+resources:
+  # No limits by default - set appropriate values for production
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity configuration
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+
+# Metrics configuration
+metrics:
+  # Enable metrics endpoint
+  enabled: true
+  # Metrics bind address
+  bindAddress: ":8080"
+  # Use HTTPS for metrics endpoint
+  secure: false
+  service:
+    # Service type for metrics
+    type: ClusterIP
+    # Service annotations
+    annotations: {}
+    # Service labels
+    labels: {}
+
+# Health probe configuration
+healthProbe:
+  # Enable health probes
+  enabled: true
+  # Bind address for health probes
+  bindAddress: ":8081"
+
+# Webhook configuration
+webhook:
+  # Enable webhooks
+  enabled: true
+  # Certificate configuration
+  certManager:
+    enabled: true
+
+# ServiceMonitor configuration (for Prometheus Operator)
+serviceMonitor:
+  # Enable ServiceMonitor
+  enabled: false
+  # Prometheus interval
+  interval: 30s
+  # ServiceMonitor path
+  path: /metrics
+  # Additional labels for ServiceMonitor
+  labels: {}
+  # Additional annotations for ServiceMonitor
+  annotations: {}
+
+# PodDisruptionBudget configuration
+podDisruptionBudget:
+  # Enable PodDisruptionBudget
+  enabled: true
+  # Max unavailable pods
+  maxUnavailable: 1
+
+# Leader election configuration
+leaderElection:
+  # Enable leader election
+  enabled: true
+  # Leader election lease duration
+  leaseDuration: 15s
+  # Leader election renew duration
+  renewDuration: 10s
+  # Leader election retry period
+  retryPeriod: 2s
+
+# Global operator configuration
+operator:
+  # Log level (DEBUG, INFO, WARN, ERROR)
+  logLevel: INFO
+  # Watch namespace (empty means all namespaces)
+  watchNamespace: ""
+  # Enable development mode
+  devMode: false

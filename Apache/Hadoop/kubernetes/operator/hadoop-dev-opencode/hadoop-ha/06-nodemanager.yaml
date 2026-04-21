@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager
+  labels:
+    app: hadoop-nodemanager
+    component: nodemanager
+spec:
+  ports:
+    - port: 8042
+      name: web
+    - port: 8041
+      name: shuffle
+  clusterIP: None
+  selector:
+    app: hadoop-nodemanager
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nodemanager
+  labels:
+    app: hadoop-nodemanager
+spec:
+  selector:
+    matchLabels:
+      app: hadoop-nodemanager
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: hadoop-nodemanager
+        component: nodemanager
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8042"
+    spec:
+      serviceAccountName: hadoop
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      initContainers:
+      - name: wait-for-resourcemanager
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Waiting for ResourceManager to be ready..."
+            for i in $(seq 1 60); do
+              if nc -z resourcemanager-0.resourcemanager.hadoop 8088 2>/dev/null; then
+                echo "ResourceManager is ready"
+                break
+              fi
+              echo "Waiting for ResourceManager... ($i/60)"
+              sleep 2
+            done
+      - name: init-nm
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            mkdir -p /opt/hadoop/logs /opt/hadoop/yarn /opt/hadoop/data/nm
+            if id "hadoop" >/dev/null 2>&1; then
+              chown -R hadoop:hadoop /opt/hadoop
+            else
+              chown -R 1000:1000 /opt/hadoop
+            fi
+            echo "NodeManager initialization complete"
+      containers:
+      - name: nodemanager
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            export HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+            export YARN_RESOURCEMANAGER_HOSTS="resourcemanager-0.resourcemanager.hadoop,resourcemanager-1.resourcemanager.hadoop"
+            exec yarn nodemanager
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: YARN_RESOURCEMANAGER_HOSTS
+            value: "resourcemanager-0.resourcemanager.hadoop,resourcemanager-1.resourcemanager.hadoop"
+        ports:
+          - containerPort: 8042
+            name: web
+            protocol: TCP
+          - containerPort: 8041
+            name: shuffle
+            protocol: TCP
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2000m"
+            ephemeral-storage: "2Gi"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+            ephemeral-storage: "4Gi"
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              nc -z localhost 8042 || exit 1
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /ws/v1/node/info
+            port: 8042
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /ws/v1/node/info
+            port: 8042
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 4
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - |
+                yarn nodemanager -refreshNodes || true
+                sleep 10
+        volumeMounts:
+          - name: nodemanager-local-dir
+            mountPath: /opt/hadoop/yarn
+          - name: hadoop-nm-data
+            mountPath: /opt/hadoop/data/nm
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml
+            subPath: mapred-site.xml
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      nodeSelector:
+        hadoop-role: worker
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: nodemanager-local-dir
+          emptyDir: {}
+        - name: hadoop-nm-data
+          emptyDir: {}
+        - name: hadoop-logs
+          emptyDir: {}

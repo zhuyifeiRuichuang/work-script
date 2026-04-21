@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  serviceName: prometheus-headless
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus-sa
+      # 确保容器有权写入挂载的存储卷
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        args:
+          - "--config.file=/etc/prometheus/prometheus.yml"
+          - "--storage.tsdb.path=/prometheus"
+          - "--storage.tsdb.retention.time=15d"
+          - "--web.enable-lifecycle" # 必须开启才能热重载
+        ports:
+        - containerPort: 9090
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: http
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: http
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/prometheus
+        - name: data
+          mountPath: /prometheus
+      
+      # 配置热重载辅助容器：监控 ConfigMap 变化并通知 Prometheus
+      - name: configmap-reload
+        image: jimmidyson/configmap-reload:v0.5.0
+        args:
+          - "--volume-dir=/etc/prometheus"
+          - "--webhook-url=http://127.0.0.1:9090/-/reload"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/prometheus
+          readOnly: true
+          
+      volumes:
+      - name: config-volume
+        configMap:
+          name: prometheus-config
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+      storageClassName: "local" # 请确保集群中有名为 local 的 StorageClass

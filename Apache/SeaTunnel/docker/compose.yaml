@@ -1,0 +1,42 @@
+
+services:
+  master:
+    image: apache/seatunnel:2.3.13
+    container_name: seatunnel_master
+    restart: unless-stopped
+    environment:
+      - ST_DOCKER_MEMBER_LIST=seatunnel_master:5801,seatunnel_worker_1:5801,seatunnel_worker_2:5801
+    entrypoint: /bin/sh -c "/opt/seatunnel/bin/seatunnel-cluster.sh -r master"
+    ports:
+      - "5801:5801"
+    networks:
+      - seatunnel_network
+
+  worker1:
+    image: apache/seatunnel:2.3.13
+    container_name: seatunnel_worker_1
+    restart: unless-stopped
+    environment:
+      - ST_DOCKER_MEMBER_LIST=seatunnel_master:5801,seatunnel_worker_1:5801,seatunnel_worker_2:5801
+    entrypoint: /bin/sh -c "/opt/seatunnel/bin/seatunnel-cluster.sh -r worker"
+    depends_on:
+      - master
+    networks:
+      - seatunnel_network
+
+  worker2:
+    image: apache/seatunnel:2.3.13
+    container_name: seatunnel_worker_2
+    restart: unless-stopped
+    environment:
+      - ST_DOCKER_MEMBER_LIST=seatunnel_master:5801,seatunnel_worker_1:5801,seatunnel_worker_2:5801
+    entrypoint: /bin/sh -c "/opt/seatunnel/bin/seatunnel-cluster.sh -r worker"
+    depends_on:
+      - master
+    networks:
+      - seatunnel_network
+
+networks:
+  seatunnel_network:
+    name: seatunnel-network
+    driver: bridge

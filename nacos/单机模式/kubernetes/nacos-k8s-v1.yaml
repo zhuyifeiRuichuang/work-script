@@ -1,0 +1,178 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos-headless
+  namespace: nacos
+  labels:
+    app: nacos-headless
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 8848
+      name: server
+      targetPort: 8848
+    - port: 9848
+      name: client-rpc
+      targetPort: 9848
+    - port: 9849
+      name: raft-rpc
+      targetPort: 9849
+    - port: 7848
+      name: old-raft-rpc
+      targetPort: 7848
+    - port: 8080
+      name: console
+      targetPort: 8080
+  selector:
+    app: nacos
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos-nodeport
+  namespace: nacos
+  labels:
+    app: nacos-nodeport
+spec:
+  type: NodePort
+  ports:
+    - port: 8848
+      name: server
+      targetPort: 8848
+      nodePort: 0
+    - port: 9848
+      name: client-rpc
+      targetPort: 9848
+      nodePort: 0
+    - port: 9849
+      name: raft-rpc
+      targetPort: 9849
+      nodePort: 0
+    - port: 7848
+      name: old-raft-rpc
+      targetPort: 7848
+      nodePort: 0
+    - port: 8080
+      name: console
+      targetPort: 8080
+      nodePort: 0
+  selector:
+    app: nacos
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nacos-cm
+  namespace: nacos
+data:
+  mysql.host: "192.168.100.33"
+  mysql.db.name: "nacos"
+  mysql.port: "3306"
+  mysql.user: "ruichuang"
+  mysql.password: "ON7q6Qp9@qKR@I"
+  nacos.auth.token: "VGhpc0lzQVNlY3JldEtleUZvck5hY29zQXV0aFRva2VuSXNNb3JlVGhhbjMyQnl0ZXMK"
+  nacos.auth.identity.key: "serverIdentity"
+  nacos.auth.identity.value: "VGhpc0lzQUlkVmFsdWVGb3JOYWNvc0lkZW50aXR5VmVyaWZpY2F0aW9u"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nacos
+  namespace: nacos
+spec:
+  serviceName: nacos-headless
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nacos
+      annotations:
+        pod.alpha.kubernetes.io/initialized: "true"
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                      - nacos
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+        - name: nacos
+          imagePullPolicy: Always
+          image: nacos/nacos-server:latest
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+          ports:
+            - containerPort: 8848
+              name: client
+            - containerPort: 9848
+              name: client-rpc
+            - containerPort: 9849
+              name: raft-rpc
+            - containerPort: 7848
+              name: old-raft-rpc
+            - containerPort: 8080
+              name: console
+          env:
+            - name: NACOS_REPLICAS
+              value: "3"
+            - name: MYSQL_SERVICE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: mysql.host
+            - name: MYSQL_SERVICE_DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: mysql.db.name
+            - name: MYSQL_SERVICE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: mysql.port
+            - name: MYSQL_SERVICE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: mysql.user
+            - name: MYSQL_SERVICE_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: mysql.password
+            - name: SPRING_DATASOURCE_PLATFORM
+              value: "mysql"
+            - name: NACOS_SERVER_PORT
+              value: "8848"
+            - name: NACOS_APPLICATION_PORT
+              value: "8848"
+            - name: PREFER_HOST_MODE
+              value: "hostname"
+            - name: NACOS_SERVERS
+              value: "nacos-0.nacos-headless.nacos.svc.cluster.local:8848 nacos-1.nacos-headless.nacos.svc.cluster.local:8848 nacos-2.nacos-headless.nacos.svc.cluster.local:8848"
+            - name: NACOS_AUTH_TOKEN
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: nacos.auth.token
+            - name: NACOS_AUTH_IDENTITY_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: nacos.auth.identity.key
+            - name: NACOS_AUTH_IDENTITY_VALUE
+              valueFrom:
+                configMapKeyRef:
+                  name: nacos-cm
+                  key: nacos.auth.identity.value
+  selector:
+    matchLabels:
+      app: nacos

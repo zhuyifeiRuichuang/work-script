@@ -1,0 +1,6 @@
+domain: hadoop.apache.org
+layout:
+- go.kubebuilder.io/v4
+projectName: hadoop-operator
+repo: github.com/apache/hadoop-operator
+version: "3"

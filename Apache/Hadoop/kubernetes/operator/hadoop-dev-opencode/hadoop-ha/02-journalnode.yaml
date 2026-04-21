@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: journalnode
+  labels:
+    app: hadoop-journalnode
+    component: journalnode
+spec:
+  ports:
+    - port: 8485
+      name: journal
+    - port: 50100
+      name: ipc
+  clusterIP: None
+  selector:
+    app: hadoop-journalnode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: journalnode
+  labels:
+    app: hadoop-journalnode
+spec:
+  serviceName: journalnode
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hadoop-journalnode
+  podManagementPolicy: Parallel
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-journalnode
+        component: journalnode
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8485"
+    spec:
+      serviceAccountName: hadoop
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: hadoop-journalnode
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: init-permissions
+          image: zhuyifeiruichuang/hadoop:3.1.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            privileged: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /opt/hadoop/data/journal
+              chmod -R 755 /opt/hadoop/data/journal
+          volumeMounts:
+            - name: journal-data
+              mountPath: /opt/hadoop/data/journal
+      containers:
+        - name: journalnode
+          image: zhuyifeiruichuang/hadoop:3.1.1
+          imagePullPolicy: IfNotPresent
+          command: ["hdfs", "journnode"]
+          env:
+            - name: HADOOP_CONF_DIR
+              value: "/opt/hadoop/etc/hadoop"
+            - name: HADOOP_LOG_DIR
+              value: "/opt/hadoop/logs"
+          ports:
+            - containerPort: 8485
+              name: journal
+              protocol: TCP
+            - containerPort: 50100
+              name: ipc
+              protocol: TCP
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+              ephemeral-storage: "500Mi"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+              ephemeral-storage: "1Gi"
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  nc -z localhost 8485 || exit 1
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "nc -z localhost 8485"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "nc -z localhost 8485"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                - sh
+                - -c
+                - sleep 10
+          volumeMounts:
+            - name: journal-data
+              mountPath: /opt/hadoop/data/journal
+            - name: hadoop-logs
+              mountPath: /opt/hadoop/logs
+            - name: hadoop-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+              subPath: core-site.xml
+            - name: hadoop-config-volume
+              mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+              subPath: hdfs-site.xml
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: journal-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local"
+        resources:
+          requests:
+            storage: 10Gi

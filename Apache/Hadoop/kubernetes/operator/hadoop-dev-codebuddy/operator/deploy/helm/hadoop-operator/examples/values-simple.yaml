@@ -1,0 +1,20 @@
+# Example values for a simple Hadoop cluster (development/test)
+
+# Enable dependencies if needed
+dependencies:
+  zookeeper:
+    enabled: false
+
+# Image configuration
+image:
+  repository: apache/hadoop
+  tag: "3.4.1"
+  pullPolicy: IfNotPresent
+
+# Metrics configuration
+metrics:
+  enabled: false
+
+# ServiceMonitor (requires Prometheus Operator)
+serviceMonitor:
+  enabled: false

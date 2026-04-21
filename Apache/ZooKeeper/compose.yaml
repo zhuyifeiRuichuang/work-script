@@ -1,0 +1,96 @@
+services:
+  zookeeper1:
+    image: zookeeper:3.9.5
+    container_name: zookeeper1
+    hostname: zookeeper1
+    restart: always
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=zookeeper1:2888:3888;2181 server.2=zookeeper2:2888:3888;2181 server.3=zookeeper3:2888:3888;2181
+      ZOO_TICK_TIME: 2000
+      ZOO_INIT_LIMIT: 10
+      ZOO_SYNC_LIMIT: 5
+      ZOO_AUTOPURGE_SNAP_RETAIN_COUNT: 10
+      ZOO_AUTOPURGE_PURGE_INTERVAL: 1
+      ZOO_4LW_COMMANDS_WHITELIST: ruok,stat,mntr,conf,isro
+    volumes:
+      - zk1_data:/data
+      - zk1_datalog:/datalog
+    networks:
+      - zk-net
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc 127.0.0.1 2181 | grep -E 'Mode: (leader|follower)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper2:
+    image: zookeeper:3.9.5
+    container_name: zookeeper2
+    hostname: zookeeper2
+    restart: always
+    environment:
+      ZOO_MY_ID: 2
+      ZOO_SERVERS: server.1=zookeeper1:2888:3888;2181 server.2=zookeeper2:2888:3888;2181 server.3=zookeeper3:2888:3888;2181
+      ZOO_TICK_TIME: 2000
+      ZOO_INIT_LIMIT: 10
+      ZOO_SYNC_LIMIT: 5
+      ZOO_AUTOPURGE_SNAP_RETAIN_COUNT: 10
+      ZOO_AUTOPURGE_PURGE_INTERVAL: 1
+      ZOO_4LW_COMMANDS_WHITELIST: ruok,stat,mntr,conf,isro
+    volumes:
+      - zk2_data:/data
+      - zk2_datalog:/datalog
+    networks:
+      - zk-net
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc 127.0.0.1 2181 | grep -E 'Mode: (leader|follower)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper3:
+    image: zookeeper:3.9.5
+    container_name: zookeeper3
+    hostname: zookeeper3
+    restart: always
+    environment:
+      ZOO_MY_ID: 3
+      ZOO_SERVERS: server.1=zookeeper1:2888:3888;2181 server.2=zookeeper2:2888:3888;2181 server.3=zookeeper3:2888:3888;2181
+      ZOO_TICK_TIME: 2000
+      ZOO_INIT_LIMIT: 10
+      ZOO_SYNC_LIMIT: 5
+      ZOO_AUTOPURGE_SNAP_RETAIN_COUNT: 10
+      ZOO_AUTOPURGE_PURGE_INTERVAL: 1
+      ZOO_4LW_COMMANDS_WHITELIST: ruok,stat,mntr,conf,isro
+    volumes:
+      - zk3_data:/data
+      - zk3_datalog:/datalog
+    networks:
+      - zk-net
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc 127.0.0.1 2181 | grep -E 'Mode: (leader|follower)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  zk1_data:
+    name: zk1_data
+  zk1_datalog:
+    name: zk1_datalog
+  zk2_data:
+    name: zk2_data
+  zk2_datalog:
+    name: zk2_datalog
+  zk3_data:
+    name: zk3_data
+  zk3_datalog:
+    name: zk3_datalog
+
+networks:
+  zk-net:
+    name: zk-net
+    driver: bridge

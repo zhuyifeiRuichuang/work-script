@@ -1,0 +1,50 @@
+# Example values for a HA Hadoop cluster with ZooKeeper
+
+# Enable dependencies
+dependencies:
+  zookeeper:
+    enabled: true
+    # ZooKeeper connection string will be auto-detected from ZooKeeperCluster
+
+# Image configuration
+image:
+  repository: apache/hadoop
+  tag: "3.4.1"
+  pullPolicy: IfNotPresent
+
+# Metrics configuration
+metrics:
+  enabled: true
+
+# ServiceMonitor (requires Prometheus Operator)
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    release: prometheus
+
+# Resource limits for production
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 1000m
+    memory: 1Gi
+
+# PodDisruptionBudget
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Leader election
+leaderElection:
+  enabled: true
+  leaseDuration: 15s
+  renewDuration: 10s
+  retryPeriod: 2s
+
+# Operator log level
+operator:
+  logLevel: INFO
+  watchNamespace: ""  # Watch all namespaces

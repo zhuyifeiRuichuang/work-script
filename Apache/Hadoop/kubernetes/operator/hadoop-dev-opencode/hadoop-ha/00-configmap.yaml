@@ -1,0 +1,385 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hadoop-config
+  labels:
+    app: hadoop
+    component: config
+data:
+  core-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/opt/hadoop/tmpdata</value>
+      </property>
+      <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://hadoop</value>
+      </property>
+      <property>
+        <name>hadoop.http.authentication.signature.secret.file</name>
+        <value>/opt/hadoop/etc/hadoop/hadoop-http-auth-signature.secret</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hadoop.hosts</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hadoop.groups</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.security.authorization</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>hadoop.security.authentication</name>
+        <value>simple</value>
+      </property>
+    </configuration>
+
+  hdfs-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <!-- HA Configuration -->
+      <property>
+        <name>dfs.nameservices</name>
+        <value>hadoop</value>
+      </property>
+      <property>
+        <name>dfs.ha.namenodes.hadoop</name>
+        <value>namenode-0,namenode-1</value>
+      </property>
+      <property>
+        <name>dfs.namenode.rpc-address.hadoop.namenode-0</name>
+        <value>namenode-0.namenode.hadoop:9000</value>
+      </property>
+      <property>
+        <name>dfs.namenode.rpc-address.hadoop.namenode-1</name>
+        <value>namenode-1.namenode.hadoop:9000</value>
+      </property>
+      <property>
+        <name>dfs.namenode.http-address.hadoop.namenode-0</name>
+        <value>namenode-0.namenode.hadoop:9870</value>
+      </property>
+      <property>
+        <name>dfs.namenode.http-address.hadoop.namenode-1</name>
+        <value>namenode-1.namenode.hadoop:9870</value>
+      </property>
+      <property>
+        <name>dfs.namenode.shared.edits.dir</name>
+        <value>qjournal://journalnode-0.journalnode.hadoop:8485;journalnode-1.journalnode.hadoop:8485;journalnode-2.journalnode.hadoop:8485/hadoop</value>
+      </property>
+      <property>
+        <name>dfs.client.failover.proxy.provider.hadoop</name>
+        <value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>
+      </property>
+      <property>
+        <name>dfs.ha.fencing.methods</name>
+        <value>shell(/bin/true)</value>
+      </property>
+      <property>
+        <name>dfs.ha.automatic-failover.enabled</name>
+        <value>true</value>
+      </property>
+
+      <!-- Storage Configuration -->
+      <property>
+        <name>dfs.namenode.name.dir</name>
+        <value>file:///opt/hadoop/data/nn</value>
+      </property>
+      <property>
+        <name>dfs.datanode.data.dir</name>
+        <value>file:///opt/hadoop/data/dn</value>
+      </property>
+      <property>
+        <name>dfs.replication</name>
+        <value>3</value>
+      </property>
+      <property>
+        <name>dfs.blocksize</name>
+        <value>134217728</value>
+      </property>
+
+      <!-- Permissions -->
+      <property>
+        <name>dfs.permissions.enabled</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>dfs.webhdfs.enabled</name>
+        <value>true</value>
+      </property>
+
+      <!-- DataNode Configuration -->
+      <property>
+        <name>dfs.datanode.address</name>
+        <value>0.0.0.0:9866</value>
+      </property>
+      <property>
+        <name>dfs.datanode.http.address</name>
+        <value>0.0.0.0:9864</value>
+      </property>
+      <property>
+        <name>dfs.datanode.ipc.address</name>
+        <value>0.0.0.0:9867</value>
+      </property>
+
+      <!-- NameNode Configuration -->
+      <property>
+        <name>dfs.namenode.http-bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>dfs.namenode.rpc-bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
+        <value>false</value>
+      </property>
+
+      <!-- HA Health Check -->
+      <property>
+        <name>dfs.ha.namenode.checkpoint.period</name>
+        <value>60</value>
+      </property>
+      <property>
+        <name>dfs.ha.namenode.checkpoint.txns</name>
+        <value>1000000</value>
+      </property>
+    </configuration>
+
+  yarn-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <!-- YARN HA Configuration -->
+      <property>
+        <name>yarn.resourcemanager.ha.enabled</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.cluster-id</name>
+        <value>yarn-cluster</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.ha.rm-ids</name>
+        <value>resourcemanager-0,resourcemanager-1</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.hostname.resourcemanager-0</name>
+        <value>resourcemanager-0.resourcemanager.hadoop</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.hostname.resourcemanager-1</name>
+        <value>resourcemanager-1.resourcemanager.hadoop</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.webapp.address.resourcemanager-0</name>
+        <value>resourcemanager-0.resourcemanager.hadoop:8088</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.webapp.address.resourcemanager-1</name>
+        <value>resourcemanager-1.resourcemanager.hadoop:8088</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.resource-tracker.address.resourcemanager-0</name>
+        <value>resourcemanager-0.resourcemanager.hadoop:8031</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.resource-tracker.address.resourcemanager-1</name>
+        <value>resourcemanager-1.resourcemanager.hadoop:8031</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.scheduler.address.resourcemanager-0</name>
+        <value>resourcemanager-0.resourcemanager.hadoop:8030</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.scheduler.address.resourcemanager-1</name>
+        <value>resourcemanager-1.resourcemanager.hadoop:8030</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.admin.address.resourcemanager-0</name>
+        <value>resourcemanager-0.resourcemanager.hadoop:8032</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.admin.address.resourcemanager-1</name>
+        <value>resourcemanager-1.resourcemanager.hadoop:8032</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.zk-address</name>
+        <value>zookeeper-0.zookeeper.hadoop:2181,zookeeper-1.zookeeper.hadoop:2181,zookeeper-2.zookeeper.hadoop:2181</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.ha.automatic-failover.enabled</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.ha.automatic-failover.zk-timeout-ms</name>
+        <value>30000</value>
+      </property>
+
+      <!-- ResourceManager Configuration -->
+      <property>
+        <name>yarn.resourcemanager.bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.pmem-check-enabled</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.vmem-check-enabled</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.delete.debug-delay-sec</name>
+        <value>600</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.aux-services</name>
+        <value>mapreduce_shuffle</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name>
+        <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+      </property>
+      <property>
+        <name>yarn.acl.enable</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.env-whitelist</name>
+        <value>JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,CLASSPATH_PREPEND_DISTCACHE,HADOOP_YARN_HOME,HADOOP_HOME,PATH,LANG,TZ,HADOOP_MAPRED_HOME</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.minimum-allocation-mb</name>
+        <value>512</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.maximum-allocation-mb</name>
+        <value>8192</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.resource.cpu-vcores</name>
+        <value>4</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.resource.memory-mb</name>
+        <value>8192</value>
+      </property>
+    </configuration>
+
+  mapred-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <property>
+        <name>mapreduce.framework.name</name>
+        <value>yarn</value>
+      </property>
+      <property>
+        <name>yarn.app.mapreduce.am.env</name>
+        <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+      </property>
+      <property>
+        <name>mapreduce.map.env</name>
+        <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+      </property>
+      <property>
+        <name>mapreduce.reduce.env</name>
+        <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+      </property>
+      <property>
+        <name>mapreduce.jobhistory.address</name>
+        <value>0.0.0.0:10020</value>
+      </property>
+      <property>
+        <name>mapreduce.jobhistory.webapp.address</name>
+        <value>0.0.0.0:19888</value>
+      </property>
+    </configuration>
+
+  capacity-scheduler.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <property>
+        <name>yarn.scheduler.capacity.maximum-applications</name>
+        <value>10000</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.maximum-am-resource-percent</name>
+        <value>0.1</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.resource-calculator</name>
+        <value>org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.queues</name>
+        <value>default</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.capacity</name>
+        <value>100</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.user-limit-factor</name>
+        <value>1</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.maximum-capacity</name>
+        <value>100</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.state</name>
+        <value>RUNNING</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.acl_submit_applications</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.acl_administer_queue</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.node-locality-delay</name>
+        <value>40</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.acl_application_max_priority</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.maximum-application-lifetime</name>
+        <value>-1</value>
+      </property>
+    </configuration>
+
+  hadoop-metrics.properties: |
+    # Hadoop metrics configuration for Prometheus
+    dfs.class=org.apache.hadoop.metrics2.sink.FileSink
+    dfs.file.name=hadoop-metrics.log
+
+  log4j.properties: |
+    # Root logger
+    log4j.rootLogger=INFO, console
+
+    # Console appender
+    log4j.appender.console=org.apache.log4j.ConsoleAppender
+    log4j.appender.console.Target=System.out
+    log4j.appender.console.layout=org.apache.log4j.PatternLayout
+    log4j.appender.console.layout.ConversionPattern=%d{ISO8601} %p %c: %m%n
+
+    # HDFS logging
+    log4j.logger.org.apache.hadoop.hdfs=INFO
+    log4j.logger.org.apache.hadoop.hdfs.server.namenode.FSNamesystem=INFO
+
+    # YARN logging
+    log4j.logger.org.apache.hadoop.yarn=INFO
+    log4j.logger.org.apache.hadoop.yarn.server.resourcemanager.RMAuditLogger=INFO

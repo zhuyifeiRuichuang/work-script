@@ -1,0 +1,26 @@
+networks:
+  vsftp-net:
+    name: vsftpd-net
+    driver: bridge
+
+volumes:
+  vsftpd-data:
+    name: vsftpd-data
+
+services:
+  vsftpd:
+    # build: .
+    image: zhuyifeiruichuang/vsftpd:3.0.5
+    container_name: vsftpd-server
+    networks:
+      - vsftpd-net
+    volumes:
+      - vsftpd-data:/data
+      - ./vsftpd.conf:/etc/vsftpd.conf
+    ports:
+      - "20:20"
+      - "21:21"
+      - "40000-40010:40000-40010"
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai

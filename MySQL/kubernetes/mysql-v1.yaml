@@ -1,0 +1,66 @@
+---
+# 持久化存储声明（适配现有存储类）
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local
+  volumeMode: Filesystem
+---
+# MySQL部署配置
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:5.7.44
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "root123456"
+        args:
+          - --max_connections=10000
+          - --bind-address=0.0.0.0
+          - --skip-name-resolve
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/sh", "-c", "until mysql -u root -p$MYSQL_ROOT_PASSWORD -e 'SELECT 1'; do sleep 2; done; mysql -u root -p$MYSQL_ROOT_PASSWORD -e \"GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;\""]
+      volumes:
+      - name: mysql-data
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+---
+# MySQL服务配置
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+spec:
+  selector:
+    app: mysql
+  type: NodePort
+  ports:
+  - port: 3306
+    targetPort: 3306

@@ -1,0 +1,67 @@
+# Example values for a HA Hadoop cluster (production)
+# This configuration enables HDFS NameNode HA and YARN ResourceManager HA
+
+# Enable dependencies
+dependencies:
+  zookeeper:
+    enabled: true
+
+# Image configuration
+image:
+  repository: apache/hadoop
+  tag: "3.4.1"
+  pullPolicy: IfNotPresent
+
+# Metrics configuration
+metrics:
+  enabled: true
+  bindAddress: ":8080"
+
+# ServiceMonitor (requires Prometheus Operator)
+serviceMonitor:
+  enabled: false
+
+# Resource limits for production
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+# PodDisruptionBudget
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Leader election
+leaderElection:
+  enabled: true
+  leaseDuration: 15s
+  renewDuration: 10s
+  retryPeriod: 2s
+
+# Operator log level
+operator:
+  logLevel: INFO
+
+# HA Configuration for NameNode and ResourceManager
+# Note: ZooKeeper must be deployed separately before enabling HA
+ha:
+  nameNodeHA:
+    enabled: true
+    nameServiceId: "ns"
+    journalClusterId: "jc"
+  resourceManagerHA:
+    enabled: true
+    clusterId: "rm-cluster"
+
+# ZooKeeper configuration (for HA automatic failover)
+zookeeper:
+  # Set to true if you want to deploy embedded ZooKeeper
+  enabled: false
+  # ZooKeeper service address (required when enabled=false)
+  # Format: host:port,host:port,host:port
+  servers: ""
+  port: 2181

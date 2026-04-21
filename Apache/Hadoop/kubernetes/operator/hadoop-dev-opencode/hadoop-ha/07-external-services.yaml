@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode-external
+  labels:
+    app: hadoop-namenode
+spec:
+  type: NodePort
+  ports:
+    - port: 9870
+      targetPort: 9870
+      nodePort: 30070
+      name: web
+    - port: 9000
+      targetPort: 9000
+      nodePort: 30090
+      name: rpc
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager-external
+  labels:
+    app: hadoop-resourcemanager
+spec:
+  type: NodePort
+  ports:
+    - port: 8088
+      targetPort: 8088
+      nodePort: 30888
+      name: web
+  selector:
+    app: hadoop-resourcemanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager-external
+  labels:
+    app: hadoop-nodemanager
+spec:
+  type: NodePort
+  ports:
+    - port: 8042
+      targetPort: 8042
+      nodePort: 30442
+      name: web
+  selector:
+    app: hadoop-nodemanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode-external
+  labels:
+    app: hadoop-datanode
+spec:
+  type: NodePort
+  ports:
+    - port: 9864
+      targetPort: 9864
+      nodePort: 30064
+      name: web
+    - port: 9866
+      targetPort: 9866
+      nodePort: 30066
+      name: data
+  selector:
+    app: hadoop-datanode

@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+spec:
+  ports:
+    - port: 9870
+      name: web
+    - port: 9000
+      name: rpc
+    #- port: 8020
+      #name: ipc
+  clusterIP: None  # 必须保留 Headless，供 StatefulSet 内部使用
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode-external  # 新增外部访问专用 Service
+  labels:
+    app: hadoop-namenode
+spec:
+  type: NodePort  # 设置为 NodePort
+  ports:
+    - port: 9870
+      name: web
+      targetPort: 9870
+    - port: 9000
+      name: rpc
+      targetPort: 9000
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: namenode
+spec:
+  serviceName: namenode  # 必须指向 Headless Service (上面的第一个 Service)
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+    spec:
+      containers:
+      - name: namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c"]
+        args:
+          - |
+            sudo mkdir -p /opt/hadoop/data/nn && \
+            sudo chown -R hadoop:hadoop /opt/hadoop/data && \
+            if [ ! -d /opt/hadoop/data/nn/current ]; then \
+              echo 'Formatting NameNode...' && \
+              hdfs namenode -format; \
+            fi && \
+            hdfs namenode
+        env:
+          - name: ENSURE_NAMENODE_DIR
+            value: "/opt/hadoop/data/nn"
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+        ports:
+          - containerPort: 9870
+            name: web
+          - containerPort: 9000
+            name: rpc
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-nn-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 10Gi

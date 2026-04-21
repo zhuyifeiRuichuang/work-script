@@ -1,0 +1,41 @@
+# 应用前请根据环境修改 hdfs.namenodeStorageClass / datanodeStorageClass（例如 local-path、rook-ceph 等）。
+# NameNode init 容器需要 privileged：目标命名空间需允许 Pod Security（如 privileged 或等价豁免）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hadoop
+---
+apiVersion: data.hadoop.org/v1alpha1
+kind: HadoopCluster
+metadata:
+  name: demo
+  namespace: hadoop
+spec:
+  image: zhuyifeiruichuang/hadoop:3.1.1
+  imagePullPolicy: IfNotPresent
+  # 离线环境将镜像同步到内网仓库后改写 image，并配置：
+  # imagePullSecrets:
+  #   - name: regcred
+  hdfs:
+    namenodeStorageClass: standard
+    namenodeStorageSize: 20Gi
+    datanodeReplicas: 3
+    datanodeStorageClass: standard
+    datanodeStorageSize: 50Gi
+    replication: 3
+  yarn:
+    enabled: true
+    nodemanagerReplicas: 2
+  expose:
+    # 默认仅集群内 ClusterIP。需要 NodePort 时改为 NodePort（单 NN 一个 Service；HA 见 hadoopcluster-ha.yaml）。
+    namenodeWeb: ClusterIP
+    datanodeWeb: ClusterIP
+    resourcemanagerWeb: ClusterIP
+    nodemanagerWeb: ClusterIP
+    # 需要 Ingress 时取消注释（与 NodePort 可同时启用；若冲突可只保留一种）：
+    # ingress:
+    #   enabled: true
+    #   className: nginx
+    #   tlsSecretName: ""
+    #   namenodeSingleHost: nn.hadoop.example.com
+    #   resourcemanagerHost: rm.hadoop.example.com

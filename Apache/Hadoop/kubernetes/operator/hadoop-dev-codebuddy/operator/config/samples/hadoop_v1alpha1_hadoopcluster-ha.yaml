@@ -1,0 +1,130 @@
+apiVersion: hadoop.kubedoop.dev/v1
+kind: HadoopCluster
+metadata:
+  name: hadoopcluster-ha
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoopcluster-ha
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: hadoop-k8s-operator
+spec:
+  # Hadoop image
+  image: apache/hadoop:3.4.1
+  imagePullPolicy: IfNotPresent
+
+  # ZooKeeper configuration (required for HA automatic failover)
+  # Note: Before deploying this cluster, you need to deploy ZooKeeper first.
+  # You can use the bitnami/zookeeper helm chart or deploy your own ZooKeeper cluster.
+  clusterConfig:
+    # Reference to ZooKeeper ConfigMap or service (format: host:port,host:port,host:port)
+    # Example: zookeeper:2181 or zookeeper-0.zookeeper-headless:2181,zookeeper-1.zookeeper-headless:2181,zookeeper-2.zookeeper-headless:2181
+    zooKeeperConfigMapName: hadoopcluster-ha-zk
+    replicationFactor: 3
+    blockSize: 134217728
+    clusterDomain: cluster.local
+    service:
+      type: ClusterIP
+
+  # High Availability configuration
+  ha:
+    # Enable NameNode HA with automatic failover
+    nameNodeHA:
+      enabled: true
+      nameServiceId: ns
+      journalClusterId: jc
+      replicas: 2
+    # Enable ResourceManager HA with automatic failover
+    resourceManagerHA:
+      enabled: true
+      clusterId: rm-cluster
+      replicas: 2
+    # Embedded ZooKeeper configuration (optional, if not using external ZooKeeper)
+    # zookeeper:
+    #   enabled: false
+    #   replicas: 3
+    #   port: 2181
+
+  # NameNode configuration (HA requires exactly 2 replicas)
+  nameNodeSpec:
+    replicas: 2
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi
+    logging:
+      loggers:
+        org.apache.hadoop.hdfs: INFO
+        org.apache.hadoop: INFO
+      console:
+        enabled: true
+        level: WARN
+
+  # JournalNode configuration (required for HDFS HA, requires odd number >= 3)
+  journalNodeSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "1"
+        memory: 2Gi
+      requests:
+        cpu: "500m"
+        memory: 1Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 20Gi
+
+  # DataNode configuration
+  dataNodeSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Gi
+    volumesPerNode: 1
+
+  # ResourceManager configuration (HA requires exactly 2 replicas)
+  resourceManagerSpec:
+    replicas: 2
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+
+  # NodeManager configuration
+  nodeManagerSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi

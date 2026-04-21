@@ -1,0 +1,53 @@
+# NameNode HA：QJM（JournalNode）+ ZooKeeper + ZKFC。Hadoop 镜像仍可用 spec.image。
+# ZooKeeper 使用 spec.zookeeper.image（默认官方 zookeeper:3.8.4），离线请同步到内网仓库。
+#
+# 暴露 Web：NodePort 与 Ingress 可同时存在；若希望「只走一种」，请注释掉另一段（见 expose 注释）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hadoop
+---
+apiVersion: data.hadoop.org/v1alpha1
+kind: HadoopCluster
+metadata:
+  name: demoha
+  namespace: hadoop
+spec:
+  image: zhuyifeiruichuang/hadoop:3.1.1
+  imagePullPolicy: IfNotPresent
+  zookeeper:
+    image: zookeeper:3.8.4
+    replicas: 3
+    storageClass: standard
+    storageSize: 8Gi
+  hdfs:
+    ha:
+      enabled: true
+      # 可选；不填则自动生成（由 CR metadata.name 派生合法 nameservice id）
+      # nameservice: demohans
+      journalnodeReplicas: 3
+    namenodeStorageClass: standard
+    namenodeStorageSize: 30Gi
+    datanodeReplicas: 3
+    datanodeStorageClass: standard
+    datanodeStorageSize: 50Gi
+    replication: 3
+  yarn:
+    enabled: true
+    nodemanagerReplicas: 2
+  expose:
+    # —— 方式 A：NodePort（HA 下 operator 为 namenode-0 / namenode-1 各建一个 NodePort Service）——
+    namenodeWeb: NodePort
+    datanodeWeb: ClusterIP
+    resourcemanagerWeb: ClusterIP
+    nodemanagerWeb: ClusterIP
+    # —— 方式 B：Ingress（与 A 可同时开；若只想要 Ingress，可把上面 namenodeWeb 改为 ClusterIP 并取消下面注释）——
+    # ingress:
+    #   enabled: true
+    #   className: nginx
+    #   tlsSecretName: hadoop-ui-tls
+    #   namenodeNn1Host: nn1.hadoop.example.com
+    #   namenodeNn2Host: nn2.hadoop.example.com
+    #   resourcemanagerHost: rm.hadoop.example.com
+    ingress:
+      enabled: false

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+-->
+<configuration>
+  <property>
+    <name>mapreduce.framework.name</name>
+    <value>yarn</value>
+    <description>The runtime framework for executing MapReduce jobs</description>
+  </property>
+  <property>
+    <name>mapreduce.application.classpath</name>
+    <value>$HADOOP_MAPRED_HOME/share/hadoop/mapreduce/*:$HADOOP_MAPRED_HOME/share/hadoop/mapreduce/lib/*</value>
+  </property>
+  <property>
+    <name>yarn.app.mapreduce.am.env</name>
+    <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+  </property>
+  <property>
+    <name>mapreduce.map.env</name>
+    <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+  </property>
+  <property>
+    <name>mapreduce.reduce.env</name>
+    <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+  </property>
+  <property>
+    <name>mapreduce.map.memory.mb</name>
+    <value>1024</value>
+    <description>Memory for map task</description>
+  </property>
+  <property>
+    <name>mapreduce.reduce.memory.mb</name>
+    <value>2048</value>
+    <description>Memory for reduce task</description>
+  </property>
+  <property>
+    <name>mapreduce.map.cpu.vcores</name>
+    <value>1</value>
+    <description>CPU cores for map task</description>
+  </property>
+  <property>
+    <name>mapreduce.reduce.cpu.vcores</name>
+    <value>1</value>
+    <description>CPU cores for reduce task</description>
+  </property>
+  <property>
+    <name>mapreduce.jobhistory.address</name>
+    <value>0.0.0.0:10020</value>
+  </property>
+  <property>
+    <name>mapreduce.jobhistory.webapp.address</name>
+    <value>0.0.0.0:19888</value>
+  </property>
+</configuration>

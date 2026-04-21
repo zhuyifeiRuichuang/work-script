@@ -1,0 +1,71 @@
+# 带SSL安全验证，数据持久化存储到数据卷。用于开发测试预生产环境。可用于资源少的生产环境。
+
+services:
+  init-kafka-perms:
+    image: busybox:latest
+    command: chown -R 1000:1000 /tmp/kraft-combined-logs
+    volumes:
+      - kafka-logs:/tmp/kraft-combined-logs
+    restart: "no"
+    container_name: kafka-perms-fix
+    networks:
+      - kafka
+
+  broker:
+    image: apache/kafka:4.2.0
+    hostname: broker
+    container_name: kafka-broker
+    ports:
+      - '9093:9093'
+    restart: unless-stopped
+    depends_on:
+      init-kafka-perms:
+        condition: service_completed_successfully
+    networks:
+      - kafka
+    volumes:
+      # 目录secrets来自https://github.com/apache/kafka/tree/trunk/docker/examples/fixtures/secrets
+      - ./secrets:/etc/kafka/secrets
+      - kafka-logs:/tmp/kraft-combined-logs
+      # 环境变量比配置文件优先级高。配置文件存放在conf目录下，挂载至容器内。参考https://github.com/apache/kafka/blob/trunk/docker/examples/fixtures/file-input/server.properties
+      # - ./conf:/mnt/shared/config
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'SSL:SSL,CONTROLLER:PLAINTEXT,SSL-INTERNAL:SSL'
+      # 固定IP场景可配置监听指定的IP，使指定的IP对外提供服务，默认监听所有。
+      # KAFKA_LISTENERS: '0.0.0.0'
+      KAFKA_ADVERTISED_LISTENERS: 'SSL://localhost:9093,SSL-INTERNAL://broker:19093'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+      KAFKA_LISTENERS: 'SSL://:9093,CONTROLLER://:29093,SSL-INTERNAL://:19093'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'SSL-INTERNAL'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
+      KAFKA_SSL_KEYSTORE_FILENAME: 'kafka01.keystore.jks'
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: 'kafka_keystore_creds'
+      KAFKA_SSL_KEY_CREDENTIALS: 'kafka_ssl_key_creds'
+      KAFKA_SSL_TRUSTSTORE_FILENAME: 'kafka.truststore.jks'
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: 'kafka_truststore_creds'
+      KAFKA_SSL_CLIENT_AUTH: 'required'
+      KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ""
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo -e \"security.protocol=SSL\nssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks\nssl.truststore.password=$(cat /etc/kafka/secrets/kafka_truststore_creds)\nssl.keystore.location=/etc/kafka/secrets/kafka01.keystore.jks\nssl.keystore.password=$(cat /etc/kafka/secrets/kafka_keystore_creds)\nssl.key.password=$(cat /etc/kafka/secrets/kafka_ssl_key_creds)\nssl.endpoint.identification.algorithm=\" > /tmp/ssl-client.conf && /opt/kafka/bin/kafka-metadata-quorum.sh --command-config /tmp/ssl-client.conf --bootstrap-server localhost:19093 describe --status | grep -q Leader"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 30s
+
+volumes:
+  kafka-logs:
+   name: kafka-logs
+
+networks:
+  kafka:
+    name: kafka

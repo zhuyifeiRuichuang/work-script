@@ -1,0 +1,209 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode
+  labels:
+    app: hadoop-datanode
+    component: datanode
+spec:
+  ports:
+    - port: 9864
+      name: web
+    - port: 9866
+      name: data
+    - port: 9867
+      name: ipc
+  clusterIP: None
+  selector:
+    app: hadoop-datanode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+  labels:
+    app: hadoop-datanode
+spec:
+  serviceName: datanode
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  podManagementPolicy: Parallel
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+        component: datanode
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9864"
+    spec:
+      serviceAccountName: hadoop
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: hadoop-datanode
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: wait-for-namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Waiting for NameNode to be ready..."
+            for i in $(seq 1 60); do
+              if nc -z namenode-0.namenode.hadoop 9000 2>/dev/null; then
+                echo "NameNode is ready"
+                break
+              fi
+              echo "Waiting for NameNode... ($i/60)"
+              sleep 2
+            done
+      - name: init-permissions
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Preparing data directory..."
+            mkdir -p /opt/hadoop/data/dn
+            
+            if id "hadoop" >/dev/null 2>&1; then
+              chown -R hadoop:hadoop /opt/hadoop/data
+            else
+              chown -R 1000:1000 /opt/hadoop/data
+            fi
+            chmod -R 755 /opt/hadoop/data
+            echo "Permissions configured"
+        volumeMounts:
+          - name: hadoop-dn-data
+            mountPath: /opt/hadoop/data/dn
+      containers:
+      - name: datanode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            export HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+            exec hdfs datanode
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+        ports:
+          - containerPort: 9864
+            name: web
+            protocol: TCP
+          - containerPort: 9866
+            name: data
+            protocol: TCP
+          - containerPort: 9867
+            name: ipc
+            protocol: TCP
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+            ephemeral-storage: "2Gi"
+          limits:
+            memory: "8Gi"
+            cpu: "2000m"
+            ephemeral-storage: "4Gi"
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              nc -z localhost 9864 || exit 1
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 4
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - |
+                su hadoop -c "hdfs dfsadmin -refreshNodes" || true
+                sleep 10
+        volumeMounts:
+          - name: hadoop-dn-data
+            mountPath: /opt/hadoop/data/dn
+            subPath: dn
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      nodeSelector:
+        hadoop-role: worker
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-dn-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 50Gi

@@ -1,0 +1,114 @@
+apiVersion: hadoop.kubedoop.dev/v1
+kind: HadoopCluster
+metadata:
+  name: hadoopcluster-sample
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoopcluster-sample
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: hadoop-k8s-operator
+spec:
+  # Hadoop image
+  image: apache/hadoop:3.4.1
+  imagePullPolicy: IfNotPresent
+
+  # Cluster configuration
+  clusterConfig:
+    # HDFS replication factor
+    replicationFactor: 3
+    # HDFS block size (128MB)
+    blockSize: 134217728
+    # Cluster domain
+    clusterDomain: cluster.local
+    # Service configuration
+    service:
+      type: ClusterIP
+
+  # NameNode configuration
+  nameNodeSpec:
+    replicas: 1
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi
+    logging:
+      loggers:
+        org.apache.hadoop.hdfs: INFO
+        org.apache.hadoop: INFO
+      console:
+        enabled: true
+        level: WARN
+      file:
+        enabled: true
+        level: INFO
+        dir: /var/log/hadoop
+
+  # DataNode configuration
+  dataNodeSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Gi
+    volumesPerNode: 1
+    logging:
+      loggers:
+        org.apache.hadoop.hdfs: INFO
+      console:
+        enabled: true
+        level: WARN
+
+  # ResourceManager configuration
+  resourceManagerSpec:
+    replicas: 1
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    logging:
+      loggers:
+        org.apache.hadoop.yarn: INFO
+      console:
+        enabled: true
+        level: WARN
+
+  # NodeManager configuration
+  nodeManagerSpec:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "1"
+        memory: 2Gi
+    logging:
+      loggers:
+        org.apache.hadoop.yarn: INFO
+      console:
+        enabled: true
+        level: WARN

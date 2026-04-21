@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<configuration>
+    <!-- 默认文件系统 -->
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://namenode:9000</value>
+        <description>默认文件系统URI</description>
+    </property>
+
+    <!-- 临时目录 -->
+    <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/opt/hadoop/data/tmp</value>
+        <description>Hadoop临时目录</description>
+    </property>
+
+    <!-- IO设置 -->
+    <property>
+        <name>io.file.buffer.size</name>
+        <value>131072</value>
+        <description>IO操作缓冲区大小</description>
+    </property>
+
+    <!-- 压缩编解码器 -->
+    <property>
+        <name>io.compression.codecs</name>
+        <value>org.apache.hadoop.io.compress.GzipCodec,org.apache.hadoop.io.compress.DefaultCodec,org.apache.hadoop.io.compress.SnappyCodec</value>
+    </property>
+
+    <!-- 安全设置 -->
+    <property>
+        <name>hadoop.security.authentication</name>
+        <value>simple</value>
+    </property>
+
+    <property>
+        <name>hadoop.security.authorization</name>
+        <value>false</value>
+    </property>
+
+    <!-- 代理用户设置（用于YARN应用） -->
+    <property>
+        <name>hadoop.proxyuser.hadoop.hosts</name>
+        <value>*</value>
+    </property>
+
+    <property>
+        <name>hadoop.proxyuser.hadoop.groups</name>
+        <value>*</value>
+    </property>
+
+    <!-- 日志设置 -->
+    <property>
+        <name>hadoop.log.dir</name>
+        <value>/opt/hadoop/logs</value>
+    </property>
+
+    <!-- 高可用设置（由Operator动态配置） -->
+    <!-- 以下配置将在部署时由Operator注入 -->
+    <!--
+    <property>
+        <name>ha.zookeeper.quorum</name>
+        <value>zookeeper-0:2181,zookeeper-1:2181,zookeeper-2:2181</value>
+    </property>
+    -->
+</configuration>

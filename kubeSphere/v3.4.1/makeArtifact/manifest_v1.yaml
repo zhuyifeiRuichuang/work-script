@@ -1,0 +1,236 @@
+apiVersion: kubekey.kubesphere.io/v1alpha2
+kind: Manifest
+metadata:
+  name: sample
+spec:
+  arches: # Define the architecture that will be included in the artifact.
+  - amd64
+  operatingSystems: # Define the operating system that will be included in the artifact.
+  - arch: amd64
+    type: linux
+    id: ubuntu
+    version: "20.04"
+    osImage: Ubuntu 20.04.3 LTS
+    repository: # Define the operating system repository iso file that will be included in the artifact.
+      iso:
+        localPath: /opt/kubesphere/ubuntu-20.04-debs-amd64.iso # Define getting the iso file from the local path.
+        url: https://ghfast.top/https://github.com/kubesphere/kubekey/releases/download/v3.1.6/ubuntu-20.04-debs-amd64.iso
+  operatingSystems: # Define the operating system that will be included in the artifact.
+  - arch: amd64
+    type: linux
+    id: ubuntu
+    version: "22.04"
+    osImage: Ubuntu 22.04.1 LTS
+    repository: # Define the operating system repository iso file that will be included in the artifact.
+      iso:
+        localPath: /opt/kubesphere/ubuntu-22.04-debs-amd64.iso # Define getting the iso file from the local path.
+        url: https://ghfast.top/https://github.com/kubesphere/kubekey/releases/download/v3.1.6/ubuntu-22.04-debs-amd64.iso
+  kubernetesDistributions: # Define the kubernetes distribution that will be included in the artifact.
+  - type: kubernetes
+    version: v1.23.10
+  - type: kubernetes
+    version: v1.28.8
+  ## The following components' versions are automatically generated based on the default configuration of KubeKey.
+  components: 
+    helm:
+      version: v3.18.5
+    cni:
+      version: v1.2.0
+    etcd:
+      version: v3.5.13
+    calicoctl:
+      version: v3.27.4
+    ## For now, if your cluster container runtime is containerd, KubeKey will add a docker 20.10.8 container runtime in the below list.
+    ## The reason is KubeKey creates a cluster with containerd by installing a docker first and making kubelet connect the socket file of containerd which docker contained.
+    containerRuntimes:
+    crictl:
+      version: v1.29.0
+    ## The following components define the private registry files that will be included in the artifact.
+    docker-registry:
+      version: "2"
+    harbor:
+      version: v2.4.1
+    docker-compose:
+      version: v2.2.2
+  ## Define the images that will be included in the artifact.
+  ## When you generate this file using KubeKey, all the images contained on the cluster hosts will be automatically added. 
+  ## Of course, you can also modify this list of images manually.
+  images:
+  - docker.ruichuang.com/kubesphere/cni:v3.20.0
+  - docker.ruichuang.com/kubesphere/busybox:latest
+  - docker.ruichuang.com/kubesphere/cni:v3.27.3
+  - docker.ruichuang.com/kubesphere/cni:v3.27.4
+  - docker.ruichuang.com/kubesphere/kube-controllers:v3.20.0
+  - docker.ruichuang.com/kubesphere/kube-controllers:v3.27.4
+  - docker.ruichuang.com/kubesphere/kube-controllers:v3.27.3
+  - docker.ruichuang.com/kubesphere/node:v3.20.0
+  - docker.ruichuang.com/kubesphere/pod2daemon-flexvol:v3.20.0
+  - docker.ruichuang.com/kubesphere/pod2daemon-flexvol:v3.27.3
+  - docker.ruichuang.com/kubesphere/pod2daemon-flexvol:v3.27.4
+  - docker.ruichuang.com/kubesphere/coredns:1.8.0
+  - docker.ruichuang.com/kubesphere/k8s-dns-node-cache:1.15.12
+  - docker.ruichuang.com/kubesphere/kube-controller-manager:v1.21.5
+  - docker.ruichuang.com/kubesphere/kube-proxy:v1.21.5
+  - docker.ruichuang.com/kubesphere/kube-scheduler:v1.21.5
+  - docker.ruichuang.com/kubesphere/pause:3.4.1
+  - docker.ruichuang.com/kubesphere/kube-apiserver:v1.22.1
+  - docker.ruichuang.com/kubesphere/kube-apiserver:v1.23.10
+  - docker.ruichuang.com/kubesphere/kube-apiserver:v1.23.15
+  - docker.ruichuang.com/kubesphere/kube-controller-manager:v1.22.1
+  - docker.ruichuang.com/kubesphere/kube-proxy:v1.22.1
+  - docker.ruichuang.com/kubesphere/kube-scheduler:v1.22.1
+  - docker.ruichuang.com/kubesphere/pause:3.5
+  - docker.ruichuang.com/kubesphere/ks-console:v3.4.1
+  - docker.ruichuang.com/kubesphere/ks-installer:v3.4.1-patch.0
+  - docker.ruichuang.com/kubesphere/kube-controller-manager:v1.23.15
+  - docker.ruichuang.com/kubesphere/kube-controller-manager:v1.23.10
+  - docker.ruichuang.com/kubesphere/kube-proxy:v1.23.15
+  - docker.ruichuang.com/kubesphere/kube-proxy:v1.23.10
+  - docker.ruichuang.com/kubesphere/kube-scheduler:v1.23.15
+  - docker.ruichuang.com/kubesphere/kube-scheduler:v1.23.10
+  - docker.ruichuang.com/kubesphere/pause:3.6
+  - docker.ruichuang.com/kubesphere/coredns:1.8.6
+  - docker.ruichuang.com/kubesphere/cni:v3.23.2
+  - docker.ruichuang.com/kubesphere/cni:v3.27.4
+  - docker.ruichuang.com/kubesphere/kube-controllers:v3.23.2
+  - docker.ruichuang.com/kubesphere/kube-controllers:v3.27.4
+  - docker.ruichuang.com/kubesphere/node:v3.23.2
+  - docker.ruichuang.com/kubesphere/node:v3.27.3
+  - docker.ruichuang.com/kubesphere/node:v3.27.4
+  - docker.ruichuang.com/kubesphere/pod2daemon-flexvol:v3.23.2
+  - docker.ruichuang.com/kubesphere/pod2daemon-flexvol:v3.27.3
+  - docker.ruichuang.com/kubesphere/pod2daemon-flexvol:v3.27.4
+  - docker.ruichuang.com/kubesphere/typha:v3.23.2
+  - docker.ruichuang.com/kubesphere/flannel:v0.12.0
+  - docker.ruichuang.com/kubesphere/provisioner-localpv:3.3.0
+  - docker.ruichuang.com/kubesphere/linux-utils:3.3.0
+  - docker.ruichuang.com/kubesphere/haproxy:2.3
+  - docker.ruichuang.com/kubesphere/nfs-subdir-external-provisioner:v4.0.2
+  - docker.ruichuang.com/kubesphere/k8s-dns-node-cache:1.15.12
+  - docker.ruichuang.com/kubesphere/k8s-dns-node-cache:1.22.20
+  - docker.ruichuang.com/kubesphere/ks-installer:v3.4.1
+  - docker.ruichuang.com/kubesphere/ks-apiserver:v3.4.1
+  - docker.ruichuang.com/kubesphere/ks-console:v3.4.1
+  - docker.ruichuang.com/kubesphere/ks-controller-manager:v3.4.1
+  - docker.ruichuang.com/kubesphere/kubectl:v1.22.0
+  - docker.ruichuang.com/kubesphere/kubectl:v1.21.0
+  - docker.ruichuang.com/kubesphere/kubectl:v1.20.0
+  - docker.ruichuang.com/kubesphere/kubefed:v0.8.1
+  - docker.ruichuang.com/kubesphere/tower:v0.2.1
+  - docker.ruichuang.com/minio/minio:RELEASE.2019-08-07T01-59-21Z
+  - docker.ruichuang.com/minio/mc:RELEASE.2019-08-07T23-14-43Z
+  - docker.ruichuang.com/csiplugin/snapshot-controller:v4.0.0
+  - docker.ruichuang.com/kubesphere/nginx-ingress-controller:v1.1.0
+  - docker.ruichuang.com/mirrorgooglecontainers/defaultbackend-amd64:1.4
+  - docker.ruichuang.com/kubesphere/metrics-server:v0.4.2
+  - docker.ruichuang.com/kubesphere/redis:5.0.14-alpine
+  - docker.ruichuang.com/kubesphere/haproxy:2.0.25-alpine
+  - docker.ruichuang.com/kubesphere/alpine:3.14
+  - docker.ruichuang.com/osixia/openldap:1.3.0
+  - docker.ruichuang.com/kubesphere/netshoot:v1.0
+  - docker.ruichuang.com/kubesphere/cloudcore:v1.13.0
+  - docker.ruichuang.com/kubesphere/iptables-manager:v1.13.0
+  - docker.ruichuang.com/kubesphere/edgeservice:v0.3.0
+  - docker.ruichuang.com/kubesphere/gatekeeper:v3.5.2
+  - docker.ruichuang.com/kubesphere/openpitrix-jobs:v3.3.2
+  - docker.ruichuang.com/kubesphere/devops-apiserver:ks-v3.4.1
+  - docker.ruichuang.com/kubesphere/devops-controller:ks-v3.4.1
+  - docker.ruichuang.com/kubesphere/devops-tools:ks-v3.4.1
+  - docker.ruichuang.com/kubesphere/ks-jenkins:v3.4.0-2.319.3-1
+  - docker.ruichuang.com/kubesphere/inbound-agent:4.10-2
+  - docker.ruichuang.com/kubesphere/builder-base:v3.2.2
+  - docker.ruichuang.com/kubesphere/builder-nodejs:v3.2.0
+  - docker.ruichuang.com/kubesphere/builder-maven:v3.2.0
+  - docker.ruichuang.com/kubesphere/builder-maven:v3.2.1-jdk11
+  - docker.ruichuang.com/kubesphere/builder-python:v3.2.0
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.0
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.2-1.16
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.2-1.17
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.2-1.18
+  - docker.ruichuang.com/kubesphere/builder-base:v3.2.2-podman
+  - docker.ruichuang.com/kubesphere/builder-nodejs:v3.2.0-podman
+  - docker.ruichuang.com/kubesphere/builder-maven:v3.2.0-podman
+  - docker.ruichuang.com/kubesphere/builder-maven:v3.2.1-jdk11-podman
+  - docker.ruichuang.com/kubesphere/builder-python:v3.2.0-podman
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.0-podman
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.2-1.16-podman
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.2-1.17-podman
+  - docker.ruichuang.com/kubesphere/builder-go:v3.2.2-1.18-podman
+  - docker.ruichuang.com/kubesphere/s2ioperator:v3.2.1
+  - docker.ruichuang.com/kubesphere/s2irun:v3.2.0
+  - docker.ruichuang.com/kubesphere/s2i-binary:v3.2.0
+  - docker.ruichuang.com/kubesphere/tomcat85-java11-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/tomcat85-java11-runtime:v3.2.0
+  - docker.ruichuang.com/kubesphere/tomcat85-java8-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/tomcat85-java8-runtime:v3.2.0
+  - docker.ruichuang.com/kubesphere/java-11-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/java-8-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/java-8-runtime:v3.2.0
+  - docker.ruichuang.com/kubesphere/java-11-runtime:v3.2.0
+  - docker.ruichuang.com/kubesphere/nodejs-8-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/nodejs-6-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/nodejs-4-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/python-36-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/python-35-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/python-34-centos7:v3.2.0
+  - docker.ruichuang.com/kubesphere/python-27-centos7:v3.2.0
+  - docker.ruichuang.com/argoproj/argocd:v2.3.3
+  - docker.ruichuang.com/argoproj/argocd-applicationset:v0.4.1
+  - docker.ruichuang.com/dexidp/dex:v2.30.2
+  - docker.ruichuang.com/library/redis:6.2.6-alpine
+  - docker.ruichuang.com/jimmidyson/configmap-reload:v0.7.1
+  - docker.ruichuang.com/prom/prometheus:v2.39.1
+  - docker.ruichuang.com/kubesphere/prometheus-config-reloader:v0.55.1
+  - docker.ruichuang.com/kubesphere/prometheus-operator:v0.55.1
+  - docker.ruichuang.com/kubesphere/kube-rbac-proxy:v0.11.0
+  - docker.ruichuang.com/kubesphere/kube-state-metrics:v2.6.0
+  - docker.ruichuang.com/prom/node-exporter:v1.3.1
+  - docker.ruichuang.com/prom/alertmanager:v0.23.0
+  - docker.ruichuang.com/thanosio/thanos:v0.31.0
+  - docker.ruichuang.com/kubesphere/grafana:8.3.3
+  - docker.ruichuang.com/kubesphere/kube-rbac-proxy:v0.11.0
+  - docker.ruichuang.com/kubesphere/notification-manager-operator:v2.3.0
+  - docker.ruichuang.com/kubesphere/notification-manager:v2.3.0
+  - docker.ruichuang.com/kubesphere/notification-tenant-sidecar:v3.2.0
+  - docker.ruichuang.com/kubesphere/elasticsearch-curator:v5.7.6
+  - docker.ruichuang.com/kubesphere/elasticsearch-oss:6.8.22
+  - docker.ruichuang.com/opensearchproject/opensearch:2.6.0
+  - docker.ruichuang.com/kubesphere/opensearch-dashboards:2.6.0
+  - docker.ruichuang.com/kubesphere/opensearch-curator:v0.0.5
+  - docker.ruichuang.com/kubesphere/fluentbit-operator:v0.14.0
+  - docker.ruichuang.com/library/docker:19.03
+  - docker.ruichuang.com/kubesphere/fluent-bit:v1.9.4
+  - docker.ruichuang.com/kubesphere/log-sidecar-injector:v1.2.0
+  - docker.ruichuang.com/kubesphere/filebeat:6.7.0
+  - docker.ruichuang.com/kubesphere/kube-events-operator:v0.6.0
+  - docker.ruichuang.com/kubesphere/kube-events-exporter:v0.6.0
+  - docker.ruichuang.com/kubesphere/kube-events-ruler:v0.6.0
+  - docker.ruichuang.com/kubesphere/kube-auditing-operator:v0.2.0
+  - docker.ruichuang.com/kubesphere/kube-auditing-webhook:v0.2.0
+  - docker.ruichuang.com/istio/pilot:1.14.6
+  - docker.ruichuang.com/kubesphere/proxyv2:1.14.6
+  - docker.ruichuang.com/jaegertracing/jaeger-operator:1.29
+  - docker.ruichuang.com/jaegertracing/jaeger-agent:1.29
+  - docker.ruichuang.com/jaegertracing/jaeger-collector:1.29
+  - docker.ruichuang.com/jaegertracing/jaeger-query:1.29
+  - docker.ruichuang.com/jaegertracing/jaeger-es-index-cleaner:1.29
+  - docker.ruichuang.com/kubesphere/kiali-operator:v1.50.1
+  - docker.ruichuang.com/kubesphere/kiali:v1.50
+  - docker.ruichuang.com/kubesphere/busybox:1.31.1
+  - docker.ruichuang.com/kubesphere/nginx:1.14-alpine
+  - docker.ruichuang.com/kubesphere/wget:1.0
+  - docker.ruichuang.com/kubesphere/hello:plain-text
+  - docker.ruichuang.com/kubesphere/wordpress:4.8-apache
+  - docker.ruichuang.com/kubesphere/hpa-example:latest
+  - docker.ruichuang.com/kubesphere/fluentd:v1.4.2-2.0
+  - docker.ruichuang.com/kubesphere/perl:latest
+  - docker.ruichuang.com/kubesphere/examples-bookinfo-productpage-v1:1.16.2
+  - docker.ruichuang.com/kubesphere/examples-bookinfo-reviews-v1:1.16.2
+  - docker.ruichuang.com/kubesphere/examples-bookinfo-reviews-v2:1.16.2
+  - docker.ruichuang.com/kubesphere/examples-bookinfo-details-v1:1.16.2
+  - docker.ruichuang.com/kubesphere/examples-bookinfo-ratings-v1:1.16.3
+  - docker.ruichuang.com/kubesphere/haproxy:2.9.6-alpine
+  - docker.ruichuang.com/library/redis:5.0.14-alpine
+  - docker.ruichuang.com/weaveworks/scope:1.13.0
+  - docker.ruichuang.com/openpolicyagent/gatekeeper:v3.5.2
+  - docker.ruichuang.com/line/kubectl-kustomize:1.20.4-4.0.5

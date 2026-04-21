@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+spec:
+  ports:
+    - port: 9870
+      name: web
+    - port: 9000
+      name: rpc
+  clusterIP: None
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode-external
+  labels:
+    app: hadoop-namenode
+spec:
+  type: NodePort
+  ports:
+    - port: 9870
+      name: web
+      targetPort: 9870
+      nodePort: 30070
+    - port: 9000
+      name: rpc
+      targetPort: 9000
+      nodePort: 30090
+  selector:
+    app: hadoop-namenode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: namenode
+spec:
+  serviceName: namenode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+    spec:
+      # --- 1. 初始化容器：负责权限管理、目录准备和按需格式化 ---
+      initContainers:
+      - name: init-namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            echo "Step 1: Preparing directories and permissions..."
+            mkdir -p /opt/hadoop/data/nn
+            # 确保 hadoop 用户拥有数据目录权限
+            chown -R hadoop:hadoop /opt/hadoop/data
+            
+            echo "Step 2: Checking if NameNode needs formatting..."
+            if [ ! -f /opt/hadoop/data/nn/current/VERSION ]; then
+              echo "No VERSION file found. Formatting NameNode..."
+              # 使用非交互模式强制格式化
+              su hadoop -c "hdfs namenode -format -nonInteractive"
+              echo "Formatting completed successfully."
+            else
+              echo "NameNode already formatted (VERSION file exists). Skipping."
+              grep -i "clusterID" /opt/hadoop/data/nn/current/VERSION
+            fi
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+            subPath: nn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+
+      # --- 2. 主容器：仅负责运行 NameNode 服务 ---
+      containers:
+      - name: namenode
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        # 使用 exec 确保 namenode 是 PID 1，能够接收系统信号实现优雅停机
+        args: ["exec hdfs namenode"]
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: HADOOP_HEAPSIZE
+            value: "1024"
+        ports:
+          - containerPort: 9870
+            name: web
+          - containerPort: 9000
+            name: rpc
+        # 资源限制：保证 Pod 的 QOS 等级
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        # 健康检查：通过 JMX 接口确保 NameNode 真正可用
+        readinessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 40
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 100
+          periodSeconds: 30
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data/nn
+            subPath: nn
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+      
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+
+  # --- 3. 存储定义 ---
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-nn-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 20Gi

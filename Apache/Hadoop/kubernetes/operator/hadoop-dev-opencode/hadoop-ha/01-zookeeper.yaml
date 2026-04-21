@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  labels:
+    app: zookeeper
+spec:
+  ports:
+    - port: 2181
+      name: client
+    - port: 2888
+      name: server
+    - port: 3888
+      name: election
+  clusterIP: None
+  selector:
+    app: zookeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: zookeeper
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: init-myid
+          image: zookeeper:3.8.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              MY_ID=${HOSTNAME##*-}
+              echo $((MY_ID + 1)) > /data/myid
+              echo "My ID is: $((MY_ID + 1))"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: zookeeper
+          image: zookeeper:3.8.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 2181
+              name: client
+            - containerPort: 2888
+              name: server
+            - containerPort: 3888
+              name: election
+          env:
+            - name: ZOO_MY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ZOO_SERVERS
+              value: "server.1=zookeeper-0.zookeeper.hadoop:2888:3888;2181,server.2=zookeeper-1.zookeeper.hadoop:2888:3888;2181,server.3=zookeeper-2.zookeeper.hadoop:2888:3888;2181"
+            - name: ZOO_TICK_TIME
+              value: "2000"
+            - name: ZOO_INIT_LIMIT
+              value: "10"
+            - name: ZOO_SYNC_LIMIT
+              value: "5"
+            - name: ZOO_MAX_CLIENT_CNXNS
+              value: "60"
+            - name: ZOO_STANDALONE_ENABLED
+              value: "false"
+            - name: ZOO_RECONFIG_ENABLED
+              value: "true"
+            - name: ZOO_AUTOPURGE_PURGE_INTERVAL
+              value: "1"
+            - name: ZOO_AUTOPURGE_SNAPRETAIN_COUNT
+              value: "3"
+          command:
+            - /usr/local/bin/docker-entrypoint.sh
+            - zkServer.sh
+          readinessProbe:
+            exec:
+              command:
+                - /usr/local/bin/zkOk.sh
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /usr/local/bin/zkOk.sh
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: logs
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local"
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local"
+        resources:
+          requests:
+            storage: 5Gi

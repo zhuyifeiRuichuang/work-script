@@ -1,0 +1,68 @@
+{{/*
+Hadoop Operator installed successfully!
+*/}}
+
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+== Deployment Status ==
+
+The Hadoop Operator is now running in namespace {{ .Release.Namespace }}.
+
+To verify the operator is running:
+
+  $ kubectl get deployment -n {{ .Release.Namespace }}
+  $ kubectl get pods -n {{ .Release.Namespace }}
+
+== Quick Start ==
+
+1. Install the required dependencies (ZooKeeper for HA mode):
+
+{{- if .Values.dependencies.zookeeper.enabled }}
+   ZooKeeper is enabled. Install the ZooKeeper operator:
+   $ helm install zookeeper-operator oci://quay.io/kubedoopcharts/zookeeper-operator
+{{- else }}
+   ZooKeeper is disabled. For production, it is recommended to enable ZooKeeper for HDFS HA.
+{{- end }}
+
+2. Create a HadoopCluster custom resource:
+
+   $ cat <<EOF | kubectl apply -f -
+   apiVersion: hadoop.kubedoop.dev/v1
+   kind: HadoopCluster
+   metadata:
+     name: my-hadoop-cluster
+     namespace: default
+   spec:
+     image: apache/hadoop:3.4.1
+     nameNodeSpec:
+       replicas: 1
+     dataNodeSpec:
+       replicas: 3
+     resourceManagerSpec:
+       replicas: 1
+     nodeManagerSpec:
+       replicas: 3
+   EOF
+
+3. Check the cluster status:
+
+   $ kubectl get hadoopcluster
+   $ kubectl describe hadoopcluster my-hadoop-cluster
+
+== Documentation ==
+
+For more information, visit:
+- https://github.com/hadoop-operator/hadoop-k8s-operator
+- https://kubedoop.dev/docs
+
+== Support ==
+
+If you encounter any issues, please report them at:
+https://github.com/hadoop-operator/hadoop-k8s-operator/issues

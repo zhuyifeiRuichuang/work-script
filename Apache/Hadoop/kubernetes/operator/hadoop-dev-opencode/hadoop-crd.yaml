@@ -1,0 +1,345 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: hadoopclusters.hadoop.apache.org
+spec:
+  group: hadoop.apache.org
+  names:
+    kind: HadoopCluster
+    listKind: HadoopClusterList
+    plural: hadoopclusters
+    singular: hadoopcluster
+  scope: Namespaced
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.nameNodeSpec.replicas
+      name: NameNodeReplicas
+      type: integer
+    - jsonPath: .spec.dataNodeSpec.replicas
+      name: DataNodeReplicas
+      type: integer
+    - jsonPath: .spec.resourceManagerSpec.replicas
+      name: ResourceManagerReplicas
+      type: integer
+    - jsonPath: .spec.nodeManagerSpec.replicas
+      name: NodeManagerReplicas
+      type: integer
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            properties:
+              image:
+                type: string
+                default: zhuyifeiruichuang/hadoop:3.1.1
+              imagePullPolicy:
+                type: string
+                default: IfNotPresent
+              nameNodeSpec:
+                type: object
+                properties:
+                  replicas:
+                    type: integer
+                    default: 1
+                  image:
+                    type: string
+                  imagePullPolicy:
+                    type: string
+                  affinity:
+                    type: object
+                    properties:
+                      nodeAffinity:
+                        type: object
+                      podAffinity:
+                        type: object
+                      podAntiAffinity:
+                        type: object
+                  nodeSelector:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    items:
+                      type: object
+                  resources:
+                    type: object
+                    properties:
+                      limits:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      requests:
+                        type: object
+                        additionalProperties:
+                          type: string
+                  storage:
+                    type: object
+                    properties:
+                      storageClassName:
+                        type: string
+                      accessModes:
+                        type: array
+                        items:
+                          type: string
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            additionalProperties:
+                              type: string
+                  env:
+                    type: array
+                    items:
+                      type: object
+                  serviceAccount:
+                    type: string
+              dataNodeSpec:
+                type: object
+                properties:
+                  replicas:
+                    type: integer
+                    default: 1
+                  image:
+                    type: string
+                  imagePullPolicy:
+                    type: string
+                  affinity:
+                    type: object
+                    properties:
+                      nodeAffinity:
+                        type: object
+                      podAffinity:
+                        type: object
+                      podAntiAffinity:
+                        type: object
+                  nodeSelector:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    items:
+                      type: object
+                  resources:
+                    type: object
+                    properties:
+                      limits:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      requests:
+                        type: object
+                        additionalProperties:
+                          type: string
+                  storage:
+                    type: object
+                    properties:
+                      storageClassName:
+                        type: string
+                      accessModes:
+                        type: array
+                        items:
+                          type: string
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            additionalProperties:
+                              type: string
+                  env:
+                    type: array
+                    items:
+                      type: object
+                  serviceAccount:
+                    type: string
+              resourceManagerSpec:
+                type: object
+                properties:
+                  replicas:
+                    type: integer
+                    default: 1
+                  image:
+                    type: string
+                  imagePullPolicy:
+                    type: string
+                  affinity:
+                    type: object
+                    properties:
+                      nodeAffinity:
+                        type: object
+                      podAffinity:
+                        type: object
+                      podAntiAffinity:
+                        type: object
+                  nodeSelector:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    items:
+                      type: object
+                  resources:
+                    type: object
+                    properties:
+                      limits:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      requests:
+                        type: object
+                        additionalProperties:
+                          type: string
+                  env:
+                    type: array
+                    items:
+                      type: object
+                  serviceAccount:
+                    type: string
+              nodeManagerSpec:
+                type: object
+                properties:
+                  replicas:
+                    type: integer
+                    default: 1
+                  image:
+                    type: string
+                  imagePullPolicy:
+                    type: string
+                  affinity:
+                    type: object
+                    properties:
+                      nodeAffinity:
+                        type: object
+                      podAffinity:
+                        type: object
+                      podAntiAffinity:
+                        type: object
+                  nodeSelector:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    items:
+                      type: object
+                  resources:
+                    type: object
+                    properties:
+                      limits:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      requests:
+                        type: object
+                        additionalProperties:
+                          type: string
+                  env:
+                    type: array
+                    items:
+                      type: object
+                  serviceAccount:
+                    type: string
+              configSpec:
+                type: object
+                properties:
+                  configMapName:
+                    type: string
+                  coreSite:
+                    type: object
+                  hdfsSite:
+                    type: object
+                  yarnSite:
+                    type: object
+                  mapredSite:
+                    type: object
+              hadoopSecurity:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  kerberos:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      realm:
+                        type: string
+                      kdcPrincipal:
+                        type: string
+                      adminPrincipal:
+                        type: string
+                      keytabSecret:
+                        type: string
+              federation:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  nameServiceId:
+                    type: string
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+              nameNodeStatus:
+                type: object
+                properties:
+                  readyReplicas:
+                    type: integer
+                  availableReplicas:
+                    type: integer
+                  phase:
+                    type: string
+              dataNodeStatus:
+                type: object
+                properties:
+                  readyReplicas:
+                    type: integer
+                  availableReplicas:
+                    type: integer
+                  phase:
+                    type: string
+              resourceManagerStatus:
+                type: object
+                properties:
+                  readyReplicas:
+                    type: integer
+                  availableReplicas:
+                    type: integer
+                  phase:
+                    type: string
+              nodeManagerStatus:
+                type: object
+                properties:
+                  readyReplicas:
+                    type: integer
+                  availableReplicas:
+                    type: integer
+                  phase:
+                    type: string
+              conditions:
+                type: array
+                items:
+                  type: object

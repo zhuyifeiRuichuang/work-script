@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager
+  labels:
+    app: hadoop-nodemanager
+spec:
+  ports:
+    - port: 8042
+      name: web
+  clusterIP: None
+  selector:
+    app: hadoop-nodemanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager-external
+  labels:
+    app: hadoop-nodemanager
+spec:
+  type: NodePort
+  ports:
+    - port: 8042
+      name: web
+      targetPort: 8042
+  selector:
+    app: hadoop-nodemanager
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nodemanager
+spec:
+  serviceName: nodemanager
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-nodemanager
+  template:
+    metadata:
+      labels:
+        app: hadoop-nodemanager
+    spec:
+      containers:
+      - name: nodemanager
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["yarn", "nodemanager"]
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+        ports:
+          - containerPort: 8042
+        volumeMounts:
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml
+            subPath: mapred-site.xml
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config

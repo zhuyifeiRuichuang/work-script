@@ -1,0 +1,729 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: hadoopclusters.hadoop.kubedoop.dev
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoopcluster
+    app.kubernetes.io/part-of: hadoop-operator
+spec:
+  group: hadoop.kubedoop.dev
+  names:
+    kind: HadoopCluster
+    listKind: HadoopClusterList
+    plural: hadoopclusters
+    singular: hadoopcluster
+    shortNames:
+      - hc
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: NameNode
+          type: integer
+          jsonPath: .spec.nameNodeSpec.replicas
+        - name: DataNode
+          type: integer
+          jsonPath: .spec.dataNodeSpec.replicas
+        - name: ResourceManager
+          type: integer
+          jsonPath: .spec.resourceManagerSpec.replicas
+        - name: NodeManager
+          type: integer
+          jsonPath: .spec.nodeManagerSpec.replicas
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - nameNodeSpec
+                - dataNodeSpec
+              properties:
+                # 全局配置
+                image:
+                  type: string
+                  default: "apache/hadoop:3.4.1"
+                  description: "Hadoop镜像仓库地址"
+                imagePullPolicy:
+                  type: string
+                  default: "IfNotPresent"
+                  description: "镜像拉取策略"
+                imagePullSecrets:
+                  type: array
+                  items:
+                    type: string
+                  description: "私有镜像仓库密钥"
+                serviceAccountName:
+                  type: string
+                  default: "hadoop-operator"
+                  description: "ServiceAccount名称"
+
+                # NameNode 配置
+                nameNodeSpec:
+                  type: object
+                  properties:
+                    replicas:
+                      type: integer
+                      default: 1
+                      minimum: 1
+                      description: "NameNode副本数"
+                    image:
+                      type: string
+                      description: "NameNode镜像（覆盖全局配置）"
+                    imagePullPolicy:
+                      type: string
+                      description: "镜像拉取策略"
+                    affinity:
+                      type: object
+                      description: "Pod亲和性配置"
+                    nodeSelector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "节点选择器"
+                    tolerations:
+                      type: array
+                      items:
+                        type: object
+                      description: "容忍配置"
+                    resources:
+                      type: object
+                      properties:
+                        limits:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        requests:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      description: "资源限制"
+                    storage:
+                      type: object
+                      properties:
+                        storageClassName:
+                          type: string
+                        accessModes:
+                          type: array
+                          items:
+                            type: string
+                        resources:
+                          type: object
+                          properties:
+                            requests:
+                              type: object
+                              additionalProperties:
+                                type: string
+                        useEmptyDir:
+                          type: boolean
+                          default: false
+                      description: "存储配置"
+                    volumesPerNode:
+                      type: integer
+                      default: 1
+                      minimum: 1
+                      description: "每个节点的卷数量"
+                    env:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+                      description: "环境变量"
+                    volumeMounts:
+                      type: array
+                      items:
+                        type: object
+                      description: "卷挂载"
+                    livenessProbe:
+                      type: object
+                      description: "存活探针"
+                    readinessProbe:
+                      type: object
+                      description: "就绪探针"
+                    annotations:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod注释"
+                    labels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod标签"
+                    serviceType:
+                      type: string
+                      default: "ClusterIP"
+                      description: "Service类型"
+                    ports:
+                      type: object
+                      properties:
+                        rpcPort:
+                          type: integer
+                          default: 9000
+                        httpPort:
+                          type: integer
+                          default: 9870
+                        httpsPort:
+                          type: integer
+                          default: 9871
+
+                # DataNode 配置
+                dataNodeSpec:
+                  type: object
+                  required:
+                    - replicas
+                  properties:
+                    replicas:
+                      type: integer
+                      default: 3
+                      minimum: 1
+                      description: "DataNode副本数"
+                    image:
+                      type: string
+                      description: "DataNode镜像（覆盖全局配置）"
+                    imagePullPolicy:
+                      type: string
+                      description: "镜像拉取策略"
+                    affinity:
+                      type: object
+                      description: "Pod亲和性配置"
+                    nodeSelector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "节点选择器"
+                    tolerations:
+                      type: array
+                      items:
+                        type: object
+                      description: "容忍配置"
+                    resources:
+                      type: object
+                      properties:
+                        limits:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        requests:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      description: "资源限制"
+                    storage:
+                      type: object
+                      properties:
+                        storageClassName:
+                          type: string
+                        accessModes:
+                          type: array
+                          items:
+                            type: string
+                        resources:
+                          type: object
+                          properties:
+                            requests:
+                              type: object
+                              additionalProperties:
+                                type: string
+                        useEmptyDir:
+                          type: boolean
+                          default: false
+                      description: "存储配置"
+                    volumesPerNode:
+                      type: integer
+                      default: 1
+                      minimum: 1
+                      description: "每个节点的卷数量"
+                    env:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+                      description: "环境变量"
+                    volumeMounts:
+                      type: array
+                      items:
+                        type: object
+                      description: "卷挂载"
+                    livenessProbe:
+                      type: object
+                      description: "存活探针"
+                    readinessProbe:
+                      type: object
+                      description: "就绪探针"
+                    annotations:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod注释"
+                    labels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod标签"
+                    serviceType:
+                      type: string
+                      description: "Service类型"
+                    ports:
+                      type: object
+                      properties:
+                        dataPort:
+                          type: integer
+                          default: 9866
+                        ipcPort:
+                          type: integer
+                          default: 9867
+                        httpPort:
+                          type: integer
+                          default: 9864
+                        httpsPort:
+                          type: integer
+                          default: 9865
+
+                # ResourceManager 配置
+                resourceManagerSpec:
+                  type: object
+                  properties:
+                    replicas:
+                      type: integer
+                      default: 1
+                      minimum: 1
+                      description: "ResourceManager副本数"
+                    image:
+                      type: string
+                      description: "ResourceManager镜像（覆盖全局配置）"
+                    imagePullPolicy:
+                      type: string
+                      description: "镜像拉取策略"
+                    affinity:
+                      type: object
+                      description: "Pod亲和性配置"
+                    nodeSelector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "节点选择器"
+                    tolerations:
+                      type: array
+                      items:
+                        type: object
+                      description: "容忍配置"
+                    resources:
+                      type: object
+                      properties:
+                        limits:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        requests:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      description: "资源限制"
+                    env:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+                      description: "环境变量"
+                    volumeMounts:
+                      type: array
+                      items:
+                        type: object
+                      description: "卷挂载"
+                    livenessProbe:
+                      type: object
+                      description: "存活探针"
+                    readinessProbe:
+                      type: object
+                      description: "就绪探针"
+                    annotations:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod注释"
+                    labels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod标签"
+                    serviceType:
+                      type: string
+                      default: "ClusterIP"
+                      description: "Service类型"
+                    ports:
+                      type: object
+                      properties:
+                        rpcPort:
+                          type: integer
+                          default: 8032
+                        httpPort:
+                          type: integer
+                          default: 8088
+                        httpsPort:
+                          type: integer
+                          default: 8090
+                        schedulerPort:
+                          type: integer
+                          default: 8030
+
+                # NodeManager 配置
+                nodeManagerSpec:
+                  type: object
+                  required:
+                    - replicas
+                  properties:
+                    replicas:
+                      type: integer
+                      default: 3
+                      minimum: 1
+                      description: "NodeManager副本数"
+                    image:
+                      type: string
+                      description: "NodeManager镜像（覆盖全局配置）"
+                    imagePullPolicy:
+                      type: string
+                      description: "镜像拉取策略"
+                    affinity:
+                      type: object
+                      description: "Pod亲和性配置"
+                    nodeSelector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "节点选择器"
+                    tolerations:
+                      type: array
+                      items:
+                        type: object
+                      description: "容忍配置"
+                    resources:
+                      type: object
+                      properties:
+                        limits:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        requests:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      description: "资源限制"
+                    env:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+                      description: "环境变量"
+                    volumeMounts:
+                      type: array
+                      items:
+                        type: object
+                      description: "卷挂载"
+                    livenessProbe:
+                      type: object
+                      description: "存活探针"
+                    readinessProbe:
+                      type: object
+                      description: "就绪探针"
+                    annotations:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod注释"
+                    labels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Pod标签"
+                    serviceType:
+                      type: string
+                      description: "Service类型"
+                    ports:
+                      type: object
+                      properties:
+                        httpPort:
+                          type: integer
+                          default: 8042
+                        httpsPort:
+                          type: integer
+                          default: 8044
+                        localizerPort:
+                          type: integer
+                          default: 8040
+                        shufflePort:
+                          type: integer
+                          default: 13562
+
+                # 配置管理
+                configSpec:
+                  type: object
+                  properties:
+                    configMapName:
+                      type: string
+                      description: "配置文件ConfigMap名称"
+                    coreSite:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "core-site.xml配置"
+                    hdfsSite:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "hdfs-site.xml配置"
+                    yarnSite:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "yarn-site.xml配置"
+                    mapredSite:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "mapred-site.xml配置"
+                    hadoopEnv:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Hadoop环境变量"
+                    logDir:
+                      type: string
+                      description: "日志目录"
+                    dataDir:
+                      type: string
+                      description: "数据目录"
+
+                # 安全配置
+                hadoopSecurity:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "启用安全模式"
+                    kerberos:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        realm:
+                          type: string
+                          description: "Kerberos领域"
+                        kdcHost:
+                          type: string
+                          description: "KDC服务器地址"
+                        kdcPort:
+                          type: integer
+                          default: 88
+                          description: "KDC端口"
+                        adminPrincipal:
+                          type: string
+                          description: "管理员主体"
+                        keytabSecret:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          description: "Keytab密钥密钥"
+                        krb5ConfMapName:
+                          type: string
+                          description: "krb5.conf ConfigMap名称"
+
+                # 高可用配置
+                ha:
+                  type: object
+                  properties:
+                    nameNodeHA:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        nameServiceId:
+                          type: string
+                          description: "NameService ID"
+                        journalClusterId:
+                          type: string
+                          description: "Journal集群ID"
+                        replicas:
+                          type: integer
+                          default: 2
+                          minimum: 2
+                    resourceManagerHA:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        clusterId:
+                          type: string
+                          description: "集群ID"
+                        replicas:
+                          type: integer
+                          default: 2
+                          minimum: 2
+
+                # 联邦配置
+                federation:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    nameServiceId:
+                      type: string
+                      description: "NameService ID"
+                    blockPoolId:
+                      type: string
+                      description: "Block Pool ID"
+
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  description: "集群状态"
+                nameNodeStatus:
+                  type: object
+                  properties:
+                    readyReplicas:
+                      type: integer
+                    availableReplicas:
+                      type: integer
+                    replicas:
+                      type: integer
+                    phase:
+                      type: string
+                    selector:
+                      type: string
+                dataNodeStatus:
+                  type: object
+                  properties:
+                    readyReplicas:
+                      type: integer
+                    availableReplicas:
+                      type: integer
+                    replicas:
+                      type: integer
+                    phase:
+                      type: string
+                    selector:
+                      type: string
+                resourceManagerStatus:
+                  type: object
+                  properties:
+                    readyReplicas:
+                      type: integer
+                    availableReplicas:
+                      type: integer
+                    replicas:
+                      type: integer
+                    phase:
+                      type: string
+                    selector:
+                      type: string
+                nodeManagerStatus:
+                  type: object
+                  properties:
+                    readyReplicas:
+                      type: integer
+                    availableReplicas:
+                      type: integer
+                    replicas:
+                      type: integer
+                    phase:
+                      type: string
+                    selector:
+                      type: string
+                externalService:
+                  type: object
+                  properties:
+                    nameNodeAddress:
+                      type: string
+                    resourceManagerAddress:
+                      type: string
+                    nameNodeWebURL:
+                      type: string
+                    resourceManagerWebURL:
+                      type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      message:
+                        type: string
+                      reason:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      lastUpdateTime:
+                        type: string
+                        format: date-time
+                observedGeneration:
+                  type: integer
+                message:
+                  type: string

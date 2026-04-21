@@ -1,0 +1,37 @@
+services:
+  nagios:
+    container_name: nagios
+
+    # default containerd image jasonrivers/nagios:latest
+    # 当前最新版镜像：zhuyifeiruichuang/nagios:4.5.12
+    image: zhuyifeiruichuang/nagios:4.5.12
+
+    restart: always
+    ports:
+      - "80:80"
+      - "5667:5667"
+    environment:
+      - TZ=Asia/Shanghai
+      - NAGIOSADMIN_USER=admin
+      - NAGIOSADMIN_PASS=admin
+    volumes:
+      # 配置文件可打包至镜像内，也可将本地配置文件所在目录挂载至容器中。
+      - nagiosetc:/opt/nagios/etc
+      - nagiosvar:/opt/nagios/var
+      - customplugins:/opt/Custom-Nagios-Plugins
+      - nagiosgraphvar:/opt/nagiosgraph/var
+      - nagiosgraphetc:/opt/nagiosgraph/etc
+    networks:
+      - nagios-net
+
+networks:
+  nagios-net:
+    name: nagios
+    driver: bridge
+
+volumes:
+  nagiosetc:
+  nagiosvar:
+  customplugins:
+  nagiosgraphvar:
+  nagiosgraphetc:

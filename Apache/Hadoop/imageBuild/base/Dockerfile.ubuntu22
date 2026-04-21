@@ -1,0 +1,42 @@
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    openjdk-8-jdk-headless \
+    python3 \
+    python3-pip \
+    dumb-init \
+    krb5-user \
+    ncat \
+    jq \
+    curl \
+    wget \
+    ca-certificates \
+    tzdata && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir robotframework
+RUN curl -L -o /opt/byteman.jar https://repo.maven.apache.org/maven2/org/jboss/byteman/byteman/4.0.4/byteman-4.0.4.jar && \
+    chmod o+r /opt/byteman.jar
+RUN mkdir -p /opt/profiler && \
+    cd /opt/profiler && \
+    curl -L https://github.com/jvm-profiling-tools/async-profiler/releases/download/v1.5/async-profiler-1.5-linux-x64.tar.gz | tar xvz
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+ENV PATH=$PATH:/opt/hadoop/bin:$JAVA_HOME/bin
+RUN groupadd --gid 1000 hadoop && \
+    useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home hadoop && \
+    mkdir -p /opt/hadoop /var/log/hadoop /data && \
+    chown -R hadoop:hadoop /opt/hadoop /var/log/hadoop /data
+ADD scripts /opt/scripts
+RUN chmod +x /opt/scripts/*.sh
+ADD scripts/krb5.conf /etc/krb5.conf
+ENV HADOOP_LOG_DIR=/var/log/hadoop
+ENV HADOOP_CONF_DIR=/etc/hadoop
+RUN mkdir -p /etc/security/keytabs && \
+    chmod 777 /etc/security/keytabs && \
+    chmod 1777 /var/log/hadoop
+WORKDIR /opt/hadoop
+VOLUME /data
+USER hadoop
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/opt/scripts/starter.sh"]

@@ -1,0 +1,16 @@
+# 示例软件包清单文件
+# 以#开头的行为注释，会被自动忽略
+# 每行一个软件包名称
+
+# 文本编辑器
+vim
+nano
+
+# 系统工具
+curl
+wget
+htop
+
+# 网络工具
+net-tools
+iputils-ping

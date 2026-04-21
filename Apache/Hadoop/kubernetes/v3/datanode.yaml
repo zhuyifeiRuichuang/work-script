@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode
+  labels:
+    app: hadoop-datanode
+spec:
+  ports:
+    - port: 9864
+      name: web
+    - port: 9866
+      name: data
+  clusterIP: None
+  selector:
+    app: hadoop-datanode
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode-external
+  labels:
+    app: hadoop-datanode
+spec:
+  type: NodePort
+  ports:
+    - port: 9864
+      name: web
+      targetPort: 9864
+      # nodePort 留空，系统将自动分配 30000-32767 之间的随机端口
+    - port: 9866
+      name: data
+      targetPort: 9866
+  selector:
+    app: hadoop-datanode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+spec:
+  serviceName: datanode
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+    spec:
+      securityContext:
+        fsGroup: 1000
+
+      initContainers:
+      # --- 1. 等待 NameNode RPC 端口就绪 ---
+      - name: wait-for-namenode
+        image: docker.1ms.run/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "⏳ 正在检测 NameNode RPC 端口 (9000)..."
+            while ! nc -z namenode-0.namenode.hadoop 9000; do
+              echo "   等待 NameNode 响应中..."
+              sleep 5
+            done
+            echo "✅ NameNode RPC 已就绪"
+
+      # --- 2. 动态权限校准 (自动识别 hadoop 用户 UID) ---
+      - name: init-permissions
+        image: docker.1ms.run/zhuyifeiruichuang/hadoop:3.1.1
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "🔧 正在准备数据目录并校准权限..."
+            mkdir -p /opt/hadoop/data/dn
+            
+            # 动态检测镜像内是否存在 hadoop 用户并授权
+            if id "hadoop" >/dev/null 2>&1; then
+              echo "检测到 hadoop 用户，执行 chown hadoop:hadoop"
+              chown -R hadoop:hadoop /opt/hadoop/data
+            else
+              echo "未检测到 hadoop 用户，回退使用 UID 1000"
+              chown -R 1000:1000 /opt/hadoop/data
+            fi
+            
+            # 授予 775 权限确保 DataNode 内部检查通过
+            chmod -R 775 /opt/hadoop/data
+            echo "✅ 权限校准完成"
+
+      containers:
+      - name: datanode
+        image: docker.1ms.run/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        # 以 root 运行进程是解决 K8s 挂载卷 chmod 权限报错 (EPERM) 的最稳妥方案
+        securityContext:
+          runAsUser: 0
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            export HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+            echo "🚀 启动 DataNode..."
+            exec hdfs datanode
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+        ports:
+          - containerPort: 9864
+            name: web
+          - containerPort: 9866
+            name: data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 60
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9864
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        volumeMounts:
+          - name: hadoop-dn-data
+            mountPath: /opt/hadoop/data/dn
+            subPath: dn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+
+  # --- 存储卷模板 ---
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-dn-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 20Gi

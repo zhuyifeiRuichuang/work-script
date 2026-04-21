@@ -1,0 +1,59 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: hadoop-cluster
+spec:
+  # Skip deleting existing cluster
+  skipDelete: false
+  # Retry count for failed operations
+  retryCount: 3
+  # Timeout for operations
+  timeout: 10m
+  # Setup steps
+  setup:
+    - name: install-dependencies
+      try:
+        - apply:
+            file: ../config/samples/dependencies.yaml
+        - wait:
+            for: condition=ready
+            resource:
+              apiVersion: zookeeper.pravega.io/v1beta1
+              kind: ZooKeeperCluster
+              name: zookeeper
+  # Test steps
+  steps:
+    - name: create-hadoop-cluster
+      try:
+        - apply:
+            file: ../config/samples/hadoop_v1alpha1_hadoopcluster.yaml
+        - wait:
+            for: condition=ready
+            resource:
+              apiVersion: hadoop.kubedoop.dev/v1
+              kind: HadoopCluster
+              name: hadoopcluster-sample
+    - name: verify-resources
+      try:
+        - assert:
+            file: assertions/statefulsets.yaml
+        - assert:
+            file: assertions/services.yaml
+    - name: verify-status
+      try:
+        - script:
+            content: |
+              kubectl get hadoopcluster hadoopcluster-sample -o jsonpath='{.status.phase}'
+              # Expected output: Running
+  # Cleanup steps
+  cleanup:
+    - name: delete-hadoop-cluster
+      try:
+        - delete:
+            apiVersion: hadoop.kubedoop.dev/v1
+            kind: HadoopCluster
+            name: hadoopcluster-sample
+        - delete:
+            apiVersion: zookeeper.pravega.io/v1beta1
+            kind: ZooKeeperCluster
+            name: zookeeper

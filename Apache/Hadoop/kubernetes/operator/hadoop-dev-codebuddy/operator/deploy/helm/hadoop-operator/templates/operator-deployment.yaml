@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hadoop-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "hadoop-operator.labels" . | nindent 4 }}
+    {{- include "hadoop-operator.operatorLabels" . | nindent 4 }}
+  {{- with .Values.pod.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "hadoop-operator.selectorLabels" . | nindent 6 }}
+      {{- include "hadoop-operator.operatorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hadoop-operator.labels" . | nindent 8 }}
+        {{- include "hadoop-operator.operatorLabels" . | nindent 8 }}
+        {{- with .Values.pod.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.pod.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "hadoop-operator.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.pod.securityContext | nindent 8 }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --health-probe-bind-address={{ .Values.healthProbe.bindAddress }}
+            - --metrics-bind-address={{ if .Values.metrics.enabled }}{{ .Values.metrics.bindAddress | default ":8080" }}{{ else }}0{{ end }}
+            {{- if .Values.leaderElection.enabled }}
+            - --leader-elect={{ .Values.leaderElection.enabled }}
+            {{- end }}
+            {{- if .Values.operator.watchNamespace }}
+            - --watch-namespace={{ .Values.operator.watchNamespace }}
+            {{- end }}
+            {{- if .Values.operator.devMode }}
+            - --dev-mode={{ .Values.operator.devMode }}
+            {{- end }}
+            - --log-level={{ .Values.operator.logLevel }}
+          securityContext:
+            {{- toYaml .Values.container.securityContext | nindent 12 }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.healthProbe.enabled }}
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- if .Values.resources }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- end }}
+          env:
+            - name: OPERATOR_NAME
+              value: "hadoop-operator"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.serviceAccountName
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

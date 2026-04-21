@@ -1,0 +1,107 @@
+apiVersion: hadoop.apache.org/v1
+kind: HadoopCluster
+metadata:
+  name: hadoop-ha
+  # 请手动指定 namespace
+  # namespace: <your-namespace>
+spec:
+  image:
+    repository: apache/hadoop
+    tag: "3.3.6"
+    pullPolicy: IfNotPresent
+  
+  hdfs:
+    nameNode:
+      replicas: 2
+      ha:
+        enabled: true
+        journalNode:
+          replicas: 3
+          storage:
+            size: "50Gi"
+            storageClassName: standard
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+      storage:
+        size: "100Gi"
+        storageClassName: standard
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - hadoop-namenode
+            topologyKey: kubernetes.io/hostname
+    
+    dataNode:
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+      storage:
+        size: "500Gi"
+        storageClassName: standard
+  
+  yarn:
+    resourceManager:
+      replicas: 2
+      ha:
+        enabled: true
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - hadoop-resourcemanager
+            topologyKey: kubernetes.io/hostname
+    
+    nodeManager:
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1000m"
+        limits:
+          memory: "8Gi"
+          cpu: "2000m"
+  
+  config:
+    hdfsSite:
+      "dfs.replication": "3"
+      "dfs.permissions.enabled": "false"
+      "dfs.webhdfs.enabled": "true"
+      "dfs.namenode.acls.enabled": "true"
+    yarnSite:
+      "yarn.nodemanager.pmem-check-enabled": "false"
+      "yarn.nodemanager.vmem-check-enabled": "false"
+      "yarn.scheduler.maximum-allocation-mb": "8192"
+      "yarn.scheduler.maximum-allocation-vcores": "4"
+  
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      labels:
+        release: prometheus

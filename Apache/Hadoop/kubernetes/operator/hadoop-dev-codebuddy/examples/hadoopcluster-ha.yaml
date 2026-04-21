@@ -1,0 +1,150 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# High Availability Hadoop Cluster Deployment
+# This YAML deploys a production-ready HA Hadoop cluster on Kubernetes
+apiVersion: hadoop.kubedoop.dev/v1
+kind: HadoopCluster
+metadata:
+  name: hadoop-ha
+  labels:
+    app.kubernetes.io/name: hadoopcluster
+    app.kubernetes.io/instance: hadoop-ha
+    app.kubernetes.io/part-of: hadoop-operator
+    app.kubernetes.io/component: hadoop-cluster
+spec:
+  # Global image configuration
+  image: apache/hadoop:3.4.1
+  imagePullPolicy: IfNotPresent
+  serviceAccountName: hadoop-operator
+
+  # NameNode Configuration (HA mode requires 2 replicas)
+  nameNodeSpec:
+    replicas: 2
+    limits:
+      cpu: "2"
+      memory: 4Gi
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 50Gi
+    ports:
+      rpcPort: 9000
+      httpPort: 9870
+      httpsPort: 9871
+
+  # DataNode Configuration
+  dataNodeSpec:
+    replicas: 5
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: "2"
+      memory: 4Gi
+    storage:
+      storageClassName: standard
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 200Gi
+    volumesPerNode: 1
+    ports:
+      dataPort: 9866
+      ipcPort: 9867
+      httpPort: 9864
+
+  # ResourceManager Configuration (HA mode requires 2 replicas)
+  resourceManagerSpec:
+    replicas: 2
+    limits:
+      cpu: "2"
+      memory: 4Gi
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    ports:
+      rpcPort: 8032
+      httpPort: 8088
+      httpsPort: 8090
+      schedulerPort: 8030
+
+  # NodeManager Configuration
+  nodeManagerSpec:
+    replicas: 5
+    limits:
+      cpu: "4"
+      memory: 16Gi
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    ports:
+      httpPort: 8042
+      httpsPort: 8044
+      localizerPort: 8040
+      shufflePort: 13562
+
+  # Configuration specification
+  configSpec:
+    logDir: /opt/hadoop/logs
+    dataDir: /data/hadoop
+    hadoopEnv:
+      HDFS_HEAPSIZE: "4096"
+      YARN_HEAPSIZE: "2048"
+    # Custom core-site properties
+    coreSite:
+      fs.trash.interval: "360"
+      hadoop.proxyuser.root.hosts: "*"
+      hadoop.proxyuser.root.groups: "*"
+    # Custom hdfs-site properties
+    hdfsSite:
+      dfs.block.size: "134217728"
+      dfs.replication: "3"
+      dfs.namenode.handler.count: "64"
+      dfs.datanode.handler.count: "32"
+      dfs.permissions.enabled: "false"
+    # Custom yarn-site properties
+    yarnSite:
+      yarn.resourcemanager.scheduler.class: org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler
+      yarn.nodemanager.resource.memory-mb: "16384"
+      yarn.nodemanager.resource.cpu-vcores: "4"
+      yarn.scheduler.minimum-allocation-mb: "1024"
+      yarn.scheduler.maximum-allocation-mb: "16384"
+      yarn.nodemanager.vmem-check-enabled: "false"
+    # Custom mapred-site properties
+    mapredSite:
+      mapreduce.jobhistory.intermediate_done_dir: /mr-history/tmp
+      mapreduce.jobhistory.done-dir: /mr-history/done
+
+  # High Availability Configuration
+  ha:
+    nameNodeHA:
+      enabled: true
+      nameServiceId: ns1
+      journalClusterId: jc1
+      replicas: 2
+    resourceManagerHA:
+      enabled: true
+      clusterId: rm-cluster
+      replicas: 2

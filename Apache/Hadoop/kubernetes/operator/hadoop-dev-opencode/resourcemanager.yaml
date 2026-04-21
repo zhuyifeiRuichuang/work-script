@@ -1,0 +1,240 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager
+  labels:
+    app: hadoop-resourcemanager
+    component: resourcemanager
+spec:
+  ports:
+    - port: 8088
+      name: web
+    - port: 8032
+      name: rpc
+  clusterIP: None
+  selector:
+    app: hadoop-resourcemanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager-external
+  labels:
+    app: hadoop-resourcemanager
+    component: resourcemanager
+spec:
+  type: NodePort
+  ports:
+    - port: 8088
+      name: web
+      targetPort: 8088
+      nodePort: 30088
+    - port: 8032
+      name: rpc
+      targetPort: 8032
+  selector:
+    app: hadoop-resourcemanager
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: resourcemanager
+  labels:
+    app: hadoop-resourcemanager
+spec:
+  serviceName: resourcemanager
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-resourcemanager
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-resourcemanager
+        component: resourcemanager
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8088"
+    spec:
+      serviceAccountName: hadoop
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+
+      initContainers:
+      - name: init-rm
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            mkdir -p /opt/hadoop/logs /opt/hadoop/data/rm
+            if id "hadoop" >/dev/null 2>&1; then
+              chown -R hadoop:hadoop /opt/hadoop
+            else
+              chown -R 1000:1000 /opt/hadoop
+            fi
+            echo "ResourceManager initialization complete"
+
+      containers:
+      - name: resourcemanager
+        image: zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            export HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+            export YARN_RESOURCEMANAGER_OPTS="-Xmx1024m"
+            exec yarn resourcemanager
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: YARN_RESOURCEMANAGER_OPTS
+            value: "-Xmx1024m"
+        ports:
+          - containerPort: 8088
+            name: web
+            protocol: TCP
+          - containerPort: 8032
+            name: rpc
+            protocol: TCP
+          - containerPort: 8033
+            name: scheduler
+            protocol: TCP
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+            ephemeral-storage: "1Gi"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+            ephemeral-storage: "2Gi"
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              nc -z localhost 8088 || exit 1
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              curl -sf http://localhost:8088/ws/v1/cluster/info || exit 1
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              curl -sf http://localhost:8088/ws/v1/cluster/info || exit 1
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - |
+                yarn rm -refreshQueues || true
+                sleep 10
+        volumeMounts:
+          - name: hadoop-rm-data
+            mountPath: /opt/hadoop/data/rm
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml
+            subPath: mapred-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/capacity-scheduler.xml
+            subPath: capacity-scheduler.xml
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - hadoop-resourcemanager
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoSchedule"
+        tolerationSeconds: 60
+
+      nodeSelector:
+        hadoop-role: master
+
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+        - name: hadoop-rm-data
+          emptyDir: {}
+
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-rm-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "local"
+      resources:
+        requests:
+          storage: 10Gi
