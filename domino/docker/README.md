@@ -4,7 +4,7 @@ Domino项目是一个开源任务调度平台，结合Apache Airflow使用。
 
 项目代码：`https://github.com/Tauffer-Consulting/domino`
 
-本文档提供标准部署指导。
+通过docker全量部署完整版domino及依赖组件。
 
 
 

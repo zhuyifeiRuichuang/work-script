@@ -4,6 +4,8 @@
 
 项目代码：`https://github.com/Tauffer-Consulting/domino`
 
+
+
 # 拉取代码
 
 ```bash
@@ -24,22 +26,25 @@ cd domino
 
 ```bash
 cd frontend
-docker build -t domino-frontend:dev -f Dockerfile.prod .
+docker build -t zhuyifeiruichuang/domino-frontend:dev -f Dockerfile.prod .
 ```
 
 # 构建后端镜像
 
 ```bash
 cd rest
-docker build -t domino-rest:dev .
+docker build -t zhuyifeiruichuang/domino-rest:dev .
 ```
 
-# 其他镜像
+# 构建domino-airflow-base镜像
 
-直接在代码根目录下构建，根据需要使用的Dockerfile选择。
+用于组件`airflow-scheduler`
 
-
+```bash
+在项目根目录下
+docker build -t zhuyifeiruichuang/domino-airflow-base:dev -f Dockerfile-airflow-domino.prod .
+```
 
 # 快速测试
 
-使用docker部署所需的`compose.yaml`快速部署测试。
+使用docker环境部署文件，快速测试镜像可用性。
