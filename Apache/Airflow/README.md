@@ -7,3 +7,5 @@ Apache Airflow是一款开源的任务流调度工具。
 代码：`https://github.com/apache/airflow/`
 
 支持容器化部署，若自定义开发，需自定义打包容器镜像。
+
+当前最新版本文档推荐部署软件在k8s环境。
