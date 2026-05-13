@@ -1,0 +1,210 @@
+# ============================================================
+# Domino Helm Chart - values.yaml
+# ============================================================
+
+# -- Global --
+global:
+  namespace: domino
+
+# -- Domino Secrets --
+# Base64 encoded values
+github_access_token_pieces: "CHANGE_ME"
+github_access_token_workflows: "CHANGE_ME"
+
+# -- Domino Frontend --
+frontend:
+  enabled: true
+  image: ghcr.io/tauffer-consulting/domino-frontend
+  tag: latest
+  replicas: 1
+  # API URL that the browser uses (relative to ingress)
+  apiUrl: /api
+  deployMode: "local-k8s"
+  service:
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+# -- Domino REST API --
+rest:
+  enabled: true
+  image: ghcr.io/tauffer-consulting/domino-rest
+  tag: latest
+  replicas: 1
+  deployMode: "local-k8s"
+  # GitHub repository for workflow DAGs (REST API pushes here)
+  workflowsRepository: "Tauffer-Consulting/domino_workflows_dev"
+  createDefaultUser: true
+  # Airflow connection
+  airflowWebserverHost: "http://{{ .Release.Name }}-airflow-webserver:8080"
+  service:
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# -- Domino Database --
+database:
+  enabled: true
+  image: postgres:13
+  name: domino
+  user: postgres
+  password: "CHANGE_ME_domino_db_password"
+  port: "5432"
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# -- Ingress --
+ingress:
+  enabled: true
+  className: nginx
+  host: domino.local
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+
+# -- Airflow (subchart) --
+airflow:
+  enabled: true
+
+  # Airflow images - use Domino's custom image with domino-py pre-installed
+  images:
+    airflow:
+      repository: ghcr.io/tauffer-consulting/domino-airflow
+      tag: latest
+
+  # Airflow executor
+  executor: CeleryExecutor
+
+  # Airflow webserver
+  webserver:
+    replicas: 1
+    service:
+      type: ClusterIP
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+  # Airflow scheduler
+  scheduler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+  # Celery workers
+  workers:
+    replicas: 2
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+
+  # Triggerer
+  triggerer:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  # Redis (Celery broker)
+  redis:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  # PostgreSQL (Airflow metadata)
+  postgresql:
+    enabled: true
+
+  # Airflow configuration
+  config:
+    core:
+      executor: CeleryExecutor
+      dags_are_paused_at_creation: "false"
+      load_examples: "false"
+      fernet_key: "CHANGE_ME"    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    webserver:
+      expose_config: "true"
+      rbac: "true"
+    api:
+      auth_backends: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+    scheduler:
+      enable_health_check: "true"
+      dag_dir_list_interval: "10"
+
+  # Airflow admin user
+  defaultAirflowTag: "latest"
+  airflowVersion: "2.7.2"
+
+  # DAG synchronization
+  dags:
+    persistence:
+      enabled: true
+      size: 2Gi
+      accessMode: ReadWriteMany
+    # Git sync (alternative to shared PVC)
+    # gitSync:
+    #   enabled: true
+    #   repo: https://github.com/your-org/domino-dags.git
+    #   branch: main
+    #   subPath: dags
+    #   sshKeySecret: airflow-ssh-secret
+
+  # Logs persistence
+  logs:
+    persistence:
+      enabled: true
+      size: 5Gi
+      accessMode: ReadWriteMany
+
+  # Extra volumes for shared storage
+  extraVolumes:
+    - name: domino-shared-storage
+      persistentVolumeClaim:
+        claimName: domino-shared-storage-pvc
+
+  extraVolumeMounts:
+    - name: domino-shared-storage
+      mountPath: /home/shared_storage
+
+  # RBAC for k8s operator
+  rbac:
+    create: true

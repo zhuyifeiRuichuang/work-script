@@ -31,7 +31,7 @@ mkdir -p /data/minio/data /data/minio/certs
 部署前检查脚本是否满足业务需求。
 
 ```bash
-bash deploy.sh
+docker compose up -d
 ```
 
 # 访问

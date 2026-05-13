@@ -1,0 +1,178 @@
+# 集群部署
+---
+# 1. 存储 Redis 集群密码
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-cluster-secret
+type: Opaque
+data:
+  # 生成密码：echo -n "cluster-password-123" | base64
+  redis-password: Y2x1c3Rlci1wYXNzd29yZC0xMjM=
+
+---
+# 2. Redis 集群基础配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-cluster-config
+data:
+  redis.conf: |
+    port 6379
+    cluster-enabled yes
+    cluster-config-file nodes.conf
+    cluster-node-timeout 5000
+    dir /data
+    appendonly yes
+    protected-mode yes
+    bind 0.0.0.0
+    maxmemory 2gb
+    maxmemory-policy allkeys-lru
+    # 注意：密码将通过启动参数动态注入，此处不硬编码
+
+---
+# 3. 无头服务 (Headless Service) - 节点发现
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-headless
+spec:
+  clusterIP: None
+  ports:
+  - port: 6379
+    name: client
+  - port: 16379
+    name: bus
+  selector:
+    app: redis-cluster
+
+---
+# 4. 集群访问服务 (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-internal
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis-cluster
+
+---
+# 5. 外部访问服务 (NodePort)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-external
+spec:
+  type: NodePort
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis-cluster
+
+---
+# 6. Redis 集群主体 (StatefulSet)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+spec:
+  serviceName: "redis-cluster-headless"
+  replicas: 6
+  selector:
+    matchLabels:
+      app: redis-cluster
+  template:
+    metadata:
+      labels:
+        app: redis-cluster
+    spec:
+      # 反亲和性：将 Pod 分散在不同物理节点以保证高可用
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: ["redis-cluster"]
+            topologyKey: "kubernetes.io/hostname"
+      
+      initContainers:
+      - name: init-sysctl
+        image: busybox
+        command: ["sh", "-c", "sysctl -w net.core.somaxconn=1024 && sysctl -w vm.overcommit_memory=1"]
+        securityContext:
+          privileged: true
+
+      containers:
+      - name: redis
+        image: redis:8.6.2
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-cluster-secret
+              key: redis-password
+        # 启动命令中注入 requirepass 和 masterauth
+        command:
+        - "sh"
+        - "-c"
+        - |
+          redis-server /usr/local/etc/redis/redis.conf \
+          --requirepass "$REDIS_PASSWORD" \
+          --masterauth "$REDIS_PASSWORD"
+        
+        ports:
+        - containerPort: 6379
+          name: client
+        - containerPort: 16379
+          name: gossip
+        
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+
+        # 带密码的健康检查
+        livenessProbe:
+          exec:
+            command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping"]
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+        volumeMounts:
+        - name: conf
+          mountPath: /usr/local/etc/redis/
+        - name: data
+          mountPath: /data
+        
+        securityContext:
+          runAsUser: 999
+          allowPrivilegeEscalation: false
+
+      volumes:
+      - name: conf
+        configMap:
+          name: redis-cluster-config
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi

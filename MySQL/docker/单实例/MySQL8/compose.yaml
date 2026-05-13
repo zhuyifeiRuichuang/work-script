@@ -5,6 +5,7 @@ services:
     container_name: mysql8-single
     restart: unless-stopped
     healthcheck:
+      # 备选 test: ["CMD-SHELL", "mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e 'SELECT 1'"]
       test: mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e "SELECT 1"
       interval: 10s
       timeout: 5s

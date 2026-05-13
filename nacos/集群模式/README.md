@@ -36,7 +36,9 @@
 ```
 
 # k8s环境
-参考`https://nacos.io/docs/latest/manual/admin/deployment/deployment-cluster`
+参考
+
+`https://nacos.io/docs/latest/manual/admin/deployment/deployment-cluster`
 
 `https://github.com/nacos-group/nacos-k8s`
 

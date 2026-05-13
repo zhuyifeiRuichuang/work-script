@@ -1,0 +1,111 @@
+# ============================================================
+# Domino PostgreSQL - Database for the Domino REST API
+# ============================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: domino-postgres-pvc
+  namespace: domino
+  labels:
+    app: domino-postgres
+    app.kubernetes.io/part-of: domino
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: domino-postgres
+  namespace: domino
+  labels:
+    app: domino-postgres
+    app.kubernetes.io/part-of: domino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: domino-postgres
+  template:
+    metadata:
+      labels:
+        app: domino-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:13
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: DOMINO_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: DOMINO_DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: DOMINO_DB_PASSWORD
+          volumeMounts:
+            - name: domino-pgdata
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: domino-pgdata
+          persistentVolumeClaim:
+            claimName: domino-postgres-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domino-postgres
+  namespace: domino
+  labels:
+    app: domino-postgres
+    app.kubernetes.io/part-of: domino
+spec:
+  type: ClusterIP
+  selector:
+    app: domino-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP

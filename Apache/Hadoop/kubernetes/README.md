@@ -37,11 +37,11 @@ Hadoop可能需要一个类似apache Doris的 operator实现集群的部署管�
 务必按照顺序部署。指定部署在namespace hadoop中。
 ```bash
 kubectl create namespace hadoop
-kubectl apply -f configmap.yaml -n haodop
-kubectl apply -f namenode.yaml -n haodop
-kubectl apply -f datanode.yaml -n haodop
-kubectl apply -f resourcemanager.yaml -n haodop
-kubectl apply -f nodemanager.yaml -n haodop
+kubectl apply -f configmap.yaml -n hadoop
+kubectl apply -f namenode.yaml -n hadoop
+kubectl apply -f datanode.yaml -n hadoop
+kubectl apply -f resourcemanager.yaml -n hadoop
+kubectl apply -f nodemanager.yaml -n hadoop
 ```
 # 部署后查询
 ```bash

@@ -1,0 +1,74 @@
+# ============================================================
+# Domino Frontend Deployment
+# ============================================================
+# React app served by Nginx. Connects to REST API via Ingress.
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: domino-frontend
+  namespace: domino
+  labels:
+    app: domino-frontend
+    app.kubernetes.io/part-of: domino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: domino-frontend
+  template:
+    metadata:
+      labels:
+        app: domino-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/tauffer-consulting/domino-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          env:
+            - name: DOMINO_DEPLOY_MODE
+              value: "local-k8s"
+            # This is the URL the browser uses to reach the API.
+            # It goes through the Ingress, so it's relative to the domain.
+            - name: API_URL
+              value: "/api"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domino-frontend
+  namespace: domino
+  labels:
+    app: domino-frontend
+    app.kubernetes.io/part-of: domino
+spec:
+  type: ClusterIP
+  selector:
+    app: domino-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP

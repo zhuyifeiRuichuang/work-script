@@ -1,9 +1,9 @@
 # 说明
 
-官方`https://doris.apache.org/`
+可在Docker和k8s环境部署。
 
-参考`https://doris.apache.org/docs/4.x/gettingStarted/quick-start`
+可自定义容器镜像。
 
-8030端口的账户是admin，无密码
+官网文档`https://doris.apache.org/`
 
-容器镜像制作`https://doris.apache.org/zh-CN/community/developer-guide/docker-dev/`
+文档相对完善。优先参考文档。

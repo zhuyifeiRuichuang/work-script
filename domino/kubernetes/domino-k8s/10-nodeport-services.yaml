@@ -1,0 +1,76 @@
+# ============================================================
+# NodePort Services - External access to Domino services
+# ============================================================
+# Uses NodePort type with auto-assigned ports (nodePort: 0).
+# Kubernetes will allocate a random port in range 30000-32767.
+#
+# Access pattern:
+#   http://<NODE_IP>:<FRONTEND_PORT>/       → Frontend
+#   http://<NODE_IP>:<REST_PORT>/api        → REST API
+#   http://<NODE_IP>:<AIRFLOW_PORT>/        → Airflow UI
+#
+# To pair with Higress / APISIX / Traefik / other gateway:
+#   Point your gateway upstream to these NodePort addresses.
+# ============================================================
+
+# ------ Domino Frontend NodePort ------
+apiVersion: v1
+kind: Service
+metadata:
+  name: domino-frontend-np
+  namespace: domino
+  labels:
+    app: domino-frontend
+    app.kubernetes.io/part-of: domino
+spec:
+  type: NodePort
+  selector:
+    app: domino-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+      nodePort: 0            # auto-assign random port
+
+---
+# ------ Domino REST API NodePort ------
+apiVersion: v1
+kind: Service
+metadata:
+  name: domino-rest-np
+  namespace: domino
+  labels:
+    app: domino-rest
+    app.kubernetes.io/part-of: domino
+spec:
+  type: NodePort
+  selector:
+    app: domino-rest
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+      nodePort: 0
+
+---
+# ------ Airflow Webserver NodePort ------
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver-np
+  namespace: domino
+  labels:
+    app: airflow-webserver
+    app.kubernetes.io/part-of: domino
+spec:
+  type: NodePort
+  selector:
+    app: airflow-webserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+      nodePort: 0

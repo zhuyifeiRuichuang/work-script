@@ -1,0 +1,619 @@
+# ============================================================
+# Airflow Deployment - Webserver, Scheduler, Worker, Triggerer
+# ============================================================
+# Uses apache/airflow:2.7.2-python3.9 with domino-py installed.
+# DAGs are synced via shared PVC (dags volume).
+# Workers run Domino tasks as Kubernetes pods via k8s_operator.
+# ============================================================
+
+# ------ ConfigMap: Airflow Configuration ------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-config
+  namespace: domino
+  labels:
+    app.kubernetes.io/part-of: domino
+data:
+  # Airflow core settings
+  AIRFLOW__CORE__EXECUTOR: "CeleryExecutor"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__EXECUTION_API_AUTH_BACKEND: "airflow.api.auth.backend.basic_auth"
+  # Scheduler
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "10"
+  # Webserver
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+  AIRFLOW__WEBSERVER__RBAC: "true"
+  # API
+  AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+
+---
+# ------ Airflow Init Job (DB migration + admin user) ------
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-init
+  namespace: domino
+  labels:
+    app: airflow-init
+    app.kubernetes.io/part-of: domino
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: airflow-init
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for Airflow Postgres to be ready
+        - name: wait-for-airflow-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Airflow PostgreSQL..."
+              until nc -z airflow-postgres 5432; do
+                echo "  ...not ready yet"
+                sleep 2
+              done
+              echo "Airflow PostgreSQL is ready!"
+        # Wait for Domino Postgres to be ready
+        - name: wait-for-domino-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Domino PostgreSQL..."
+              until nc -z domino-postgres 5432; do
+                echo "  ...not ready yet"
+                sleep 2
+              done
+              echo "Domino PostgreSQL is ready!"
+      containers:
+        - name: airflow-init
+          image: ghcr.io/tauffer-consulting/domino-airflow-base:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+
+              # Initialize Airflow DB
+              echo "=== Initializing Airflow database ==="
+              airflow db init
+
+              # Create admin user
+              echo "=== Creating Airflow admin user ==="
+              airflow users create \
+                --username "${AIRFLOW_ADMIN_USERNAME}" \
+                --password "${AIRFLOW_ADMIN_PASSWORD}" \
+                --firstname Admin \
+                --lastname User \
+                --role Admin \
+                --email admin@domino.local || true
+
+              echo "=== Airflow init complete ==="
+          env:
+            - name: AIRFLOW_HOME
+              value: /opt/airflow
+            - name: AIRFLOW_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_USER
+            - name: AIRFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_PASSWORD
+            - name: AIRFLOW_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_NAME
+            - name: AIRFLOW_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_ADMIN_USERNAME
+            - name: AIRFLOW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_ADMIN_PASSWORD
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: "SequentialExecutor"
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_FERNET_KEY
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              value: "db+postgresql://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__BROKER_URL
+              value: "redis://airflow-redis:6379/0"
+            - name: _AIRFLOW_DB_MIGRATE
+              value: "true"
+            - name: _AIRFLOW_WWW_USER_CREATE
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# ------ Airflow Webserver ------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+  namespace: domino
+  labels:
+    app: airflow-webserver
+    app.kubernetes.io/part-of: domino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-webserver
+  template:
+    metadata:
+      labels:
+        app: airflow-webserver
+    spec:
+      initContainers:
+        - name: wait-for-init
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for airflow-init job to complete..."
+              # Simple wait - check if postgres has airflow tables
+              until nc -z airflow-postgres 5432; do sleep 2; done
+              sleep 10
+              echo "Proceeding..."
+      containers:
+        - name: webserver
+          image: ghcr.io/tauffer-consulting/domino-airflow-base:latest
+          imagePullPolicy: IfNotPresent
+          command: ["airflow"]
+          args: ["webserver", "--port", "8080"]
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+          env:
+            - name: AIRFLOW_HOME
+              value: /opt/airflow
+            - name: AIRFLOW_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_USER
+            - name: AIRFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_PASSWORD
+            - name: AIRFLOW_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_NAME
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_FERNET_KEY
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              value: "db+postgresql://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__BROKER_URL
+              value: "redis://airflow-redis:6379/0"
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_SECRET_KEY
+            - name: AIRFLOW_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_ADMIN_USERNAME
+            - name: AIRFLOW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_ADMIN_PASSWORD
+            - name: DOMINO_DEPLOY_MODE
+              value: "local-k8s"
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags
+            - name: airflow-logs
+              mountPath: /opt/airflow/logs
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: airflow-dags
+          persistentVolumeClaim:
+            claimName: airflow-dags-pvc
+        - name: airflow-logs
+          persistentVolumeClaim:
+            claimName: airflow-logs-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: domino
+  labels:
+    app: airflow-webserver
+    app.kubernetes.io/part-of: domino
+spec:
+  type: ClusterIP
+  selector:
+    app: airflow-webserver
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+---
+# ------ Airflow Scheduler ------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: domino
+  labels:
+    app: airflow-scheduler
+    app.kubernetes.io/part-of: domino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      serviceAccountName: airflow-worker
+      initContainers:
+        - name: wait-for-init
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z airflow-postgres 5432; do sleep 2; done
+              until nc -z airflow-redis 6379; do sleep 2; done
+              sleep 15
+              echo "Proceeding..."
+      containers:
+        - name: scheduler
+          image: ghcr.io/tauffer-consulting/domino-airflow-base:latest
+          imagePullPolicy: IfNotPresent
+          command: ["airflow"]
+          args: ["scheduler"]
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+          env:
+            - name: AIRFLOW_HOME
+              value: /opt/airflow
+            - name: AIRFLOW_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_USER
+            - name: AIRFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_PASSWORD
+            - name: AIRFLOW_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_NAME
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_FERNET_KEY
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              value: "db+postgresql://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__BROKER_URL
+              value: "redis://airflow-redis:6379/0"
+            - name: DOMINO_DEPLOY_MODE
+              value: "local-k8s"
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags
+            - name: airflow-logs
+              mountPath: /opt/airflow/logs
+            - name: domino-shared-storage
+              mountPath: /home/shared_storage
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command:
+                - airflow
+                - jobs
+                - check
+                - --job-type
+                - SchedulerJob
+                - --hostname
+                - "$(HOSTNAME)"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: airflow-dags
+          persistentVolumeClaim:
+            claimName: airflow-dags-pvc
+        - name: airflow-logs
+          persistentVolumeClaim:
+            claimName: airflow-logs-pvc
+        - name: domino-shared-storage
+          persistentVolumeClaim:
+            claimName: domino-workflow-shared-storage-volume-claim
+
+---
+# ------ Airflow Worker (Celery) ------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-worker
+  namespace: domino
+  labels:
+    app: airflow-worker
+    app.kubernetes.io/part-of: domino
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: airflow-worker
+  template:
+    metadata:
+      labels:
+        app: airflow-worker
+    spec:
+      serviceAccountName: airflow-worker
+      initContainers:
+        - name: wait-for-init
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z airflow-postgres 5432; do sleep 2; done
+              until nc -z airflow-redis 6379; do sleep 2; done
+              sleep 15
+              echo "Proceeding..."
+      containers:
+        - name: worker
+          image: ghcr.io/tauffer-consulting/domino-airflow-base:latest
+          imagePullPolicy: IfNotPresent
+          command: ["airflow"]
+          args: ["celery", "worker"]
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+          env:
+            - name: AIRFLOW_HOME
+              value: /opt/airflow
+            - name: AIRFLOW_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_USER
+            - name: AIRFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_PASSWORD
+            - name: AIRFLOW_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_NAME
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_FERNET_KEY
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              value: "db+postgresql://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__BROKER_URL
+              value: "redis://airflow-redis:6379/0"
+            - name: DUMB_INIT_SETSID
+              value: "0"
+            - name: DOMINO_DEPLOY_MODE
+              value: "local-k8s"
+            - name: LOCAL_DOMINO_SHARED_DATA_PATH
+              value: /home/shared_storage
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags
+            - name: airflow-logs
+              mountPath: /opt/airflow/logs
+            - name: domino-shared-storage
+              mountPath: /home/shared_storage
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery --app airflow.executors.celery_executor.app inspect ping -d celery@$(HOSTNAME)"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: airflow-dags
+          persistentVolumeClaim:
+            claimName: airflow-dags-pvc
+        - name: airflow-logs
+          persistentVolumeClaim:
+            claimName: airflow-logs-pvc
+        - name: domino-shared-storage
+          persistentVolumeClaim:
+            claimName: domino-workflow-shared-storage-volume-claim
+
+---
+# ------ Airflow Triggerer ------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-triggerer
+  namespace: domino
+  labels:
+    app: airflow-triggerer
+    app.kubernetes.io/part-of: domino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-triggerer
+  template:
+    metadata:
+      labels:
+        app: airflow-triggerer
+    spec:
+      initContainers:
+        - name: wait-for-init
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z airflow-postgres 5432; do sleep 2; done
+              sleep 15
+              echo "Proceeding..."
+      containers:
+        - name: triggerer
+          image: ghcr.io/tauffer-consulting/domino-airflow-base:latest
+          imagePullPolicy: IfNotPresent
+          command: ["airflow"]
+          args: ["triggerer"]
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+          env:
+            - name: AIRFLOW_HOME
+              value: /opt/airflow
+            - name: AIRFLOW_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_USER
+            - name: AIRFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_PASSWORD
+            - name: AIRFLOW_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_DB_NAME
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: domino-secrets
+                  key: AIRFLOW_FERNET_KEY
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql+psycopg2://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              value: "db+postgresql://$(AIRFLOW_DB_USER):$(AIRFLOW_DB_PASSWORD)@airflow-postgres:5432/$(AIRFLOW_DB_NAME)"
+            - name: AIRFLOW__CELERY__BROKER_URL
+              value: "redis://airflow-redis:6379/0"
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags
+            - name: airflow-logs
+              mountPath: /opt/airflow/logs
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command:
+                - airflow
+                - jobs
+                - check
+                - --job-type
+                - TriggererJob
+                - --hostname
+                - "$(HOSTNAME)"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+      volumes:
+        - name: airflow-dags
+          persistentVolumeClaim:
+            claimName: airflow-dags-pvc
+        - name: airflow-logs
+          persistentVolumeClaim:
+            claimName: airflow-logs-pvc
