@@ -1,0 +1,286 @@
+# 专用密码配置
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-nacos-secret
+  namespace: nacos
+type: Opaque
+stringData:
+  ROOT_PASSWORD: "ComplexPassword123!"
+  NACOS_PASSWORD: "nacos"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-nacos-config
+  namespace: nacos
+data:
+  my.cnf: |
+    [mysqld]
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    skip-name-resolve
+    max_connections=1000
+    max_allowed_packet=64M
+    wait_timeout=600
+    interactive_timeout=600
+    default-storage-engine=INNODB
+    transaction_isolation=READ-COMMITTED
+    innodb_buffer_pool_size=1G
+    innodb_redo_log_capacity=536870912
+    innodb_flush_log_at_trx_commit=1
+    innodb_file_per_table=1
+    open_files_limit=65535
+    default_authentication_plugin=mysql_native_password
+
+  init.sql: |
+    -- 创建Nacos专用库
+    CREATE DATABASE IF NOT EXISTS nacos DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+    -- 创建 nacos 用户，密码 nacos，任意主机可访问
+    CREATE USER IF NOT EXISTS 'nacos'@'%' IDENTIFIED WITH mysql_native_password BY 'nacos';
+    GRANT ALL PRIVILEGES ON nacos.* TO 'nacos'@'%';
+    FLUSH PRIVILEGES;
+
+  mysql-schema.sql: |
+    USE nacos;
+
+    CREATE TABLE `config_info` (
+       `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'id',
+       `data_id` varchar(255) NOT NULL COMMENT 'data_id',
+       `group_id` varchar(128) DEFAULT NULL COMMENT 'group_id',
+       `content` longtext NOT NULL COMMENT 'content',
+       `md5` varchar(32) DEFAULT NULL COMMENT 'md5',
+       `gmt_create` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+       `gmt_modified` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '修改时间',
+       `src_user` text COMMENT 'source user',
+       `src_ip` varchar(50) DEFAULT NULL COMMENT 'source ip',
+       `app_name` varchar(128) DEFAULT NULL COMMENT 'app_name',
+       `tenant_id` varchar(128) DEFAULT '' COMMENT '租户字段',
+       `c_desc` varchar(256) DEFAULT NULL COMMENT 'configuration description',
+       `c_use` varchar(64) DEFAULT NULL COMMENT 'configuration usage',
+       `effect` varchar(64) DEFAULT NULL COMMENT '配置生效的描述',
+       `type` varchar(64) DEFAULT NULL COMMENT '配置的类型',
+       `c_schema` text COMMENT '配置的模式',
+       `encrypted_data_key` varchar(1024) NOT NULL DEFAULT '' COMMENT '密钥',
+       PRIMARY KEY (`id`),
+       UNIQUE KEY `uk_configinfo_datagrouptenant` (`data_id`,`group_id`,`tenant_id`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='config_info';
+
+    CREATE TABLE `config_info_gray` (
+       `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'id',
+       `data_id` varchar(255) NOT NULL COMMENT 'data_id',
+       `group_id` varchar(128) NOT NULL COMMENT 'group_id',
+       `content` longtext NOT NULL COMMENT 'content',
+       `md5` varchar(32) DEFAULT NULL COMMENT 'md5',
+       `src_user` text COMMENT 'src_user',
+       `src_ip` varchar(100) DEFAULT NULL COMMENT 'src_ip',
+       `gmt_create` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'gmt_create',
+       `gmt_modified` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'gmt_modified',
+       `app_name` varchar(128) DEFAULT NULL COMMENT 'app_name',
+       `tenant_id` varchar(128) DEFAULT '' COMMENT 'tenant_id',
+       `gray_name` varchar(128) NOT NULL COMMENT 'gray_name',
+       `gray_rule` text NOT NULL COMMENT 'gray_rule',
+       `encrypted_data_key` varchar(256) NOT NULL DEFAULT '' COMMENT 'encrypted_data_key',
+       PRIMARY KEY (`id`),
+       UNIQUE KEY `uk_configinfogray_datagrouptenantgray` (`data_id`,`group_id`,`tenant_id`,`gray_name`),
+       KEY `idx_dataid_gmt_modified` (`data_id`,`gmt_modified`),
+       KEY `idx_gmt_modified` (`gmt_modified`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='config_info_gray';
+
+    CREATE TABLE `config_tags_relation` (
+       `id` bigint NOT NULL COMMENT 'id',
+       `tag_name` varchar(128) NOT NULL COMMENT 'tag_name',
+       `tag_type` varchar(64) DEFAULT NULL COMMENT 'tag_type',
+       `data_id` varchar(255) NOT NULL COMMENT 'data_id',
+       `group_id` varchar(128) NOT NULL COMMENT 'group_id',
+       `tenant_id` varchar(128) DEFAULT '' COMMENT 'tenant_id',
+       `nid` bigint NOT NULL AUTO_INCREMENT COMMENT 'nid',
+       PRIMARY KEY (`nid`),
+       UNIQUE KEY `uk_configtagrelation_configidtag` (`id`,`tag_name`,`tag_type`),
+       KEY `idx_tenant_id` (`tenant_id`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='config_tag_relation';
+
+    CREATE TABLE `group_capacity` (
+       `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+       `group_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Group ID，空字符表示整个集群',
+       `quota` int unsigned NOT NULL DEFAULT '0' COMMENT '配额，0表示使用默认值',
+       `usage` int unsigned NOT NULL DEFAULT '0' COMMENT '使用量',
+       `max_size` int unsigned NOT NULL DEFAULT '0' COMMENT '单个配置大小上限，单位为字节，0表示使用默认值',
+       `max_aggr_count` int unsigned NOT NULL DEFAULT '0' COMMENT '聚合子配置最大个数，0表示使用默认值',
+       `max_aggr_size` int unsigned NOT NULL DEFAULT '0' COMMENT '单个聚合数据的子配置大小上限，单位为字节，0表示使用默认值',
+       `max_history_count` int unsigned NOT NULL DEFAULT '0' COMMENT '最大变更历史数量',
+       `gmt_create` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+       `gmt_modified` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '修改时间',
+       PRIMARY KEY (`id`),
+       UNIQUE KEY `uk_group_id` (`group_id`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='集群、各Group容量信息表';
+
+    CREATE TABLE `his_config_info` (
+       `id` bigint unsigned NOT NULL COMMENT 'id',
+       `nid` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'nid',
+       `data_id` varchar(255) NOT NULL COMMENT 'data_id',
+       `group_id` varchar(128) NOT NULL COMMENT 'group_id',
+       `app_name` varchar(128) DEFAULT NULL COMMENT 'app_name',
+       `content` longtext NOT NULL COMMENT 'content',
+       `md5` varchar(32) DEFAULT NULL COMMENT 'md5',
+       `gmt_create` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+       `gmt_modified` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '修改时间',
+       `src_user` text COMMENT 'source user',
+       `src_ip` varchar(50) DEFAULT NULL COMMENT 'source ip',
+       `op_type` char(10) DEFAULT NULL COMMENT 'operation type',
+       `tenant_id` varchar(128) DEFAULT '' COMMENT '租户字段',
+       `encrypted_data_key` varchar(1024) NOT NULL DEFAULT '' COMMENT '密钥',
+       `publish_type` varchar(50) DEFAULT 'formal' COMMENT 'publish type gray or formal',
+       `gray_name` varchar(50) DEFAULT NULL COMMENT 'gray name',
+       `ext_info` longtext DEFAULT NULL COMMENT 'ext info',
+       PRIMARY KEY (`nid`),
+       KEY `idx_gmt_create` (`gmt_create`),
+       KEY `idx_gmt_modified` (`gmt_modified`),
+       KEY `idx_did` (`data_id`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='多租户改造';
+
+    CREATE TABLE `tenant_capacity` (
+       `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+       `tenant_id` varchar(128) NOT NULL DEFAULT '' COMMENT 'Tenant ID',
+       `quota` int unsigned NOT NULL DEFAULT '0' COMMENT '配额，0表示使用默认值',
+       `usage` int unsigned NOT NULL DEFAULT '0' COMMENT '使用量',
+       `max_size` int unsigned NOT NULL DEFAULT '0' COMMENT '单个配置大小上限，单位为字节，0表示使用默认值',
+       `max_aggr_count` int unsigned NOT NULL DEFAULT '0' COMMENT '聚合子配置最大个数',
+       `max_aggr_size` int unsigned NOT NULL DEFAULT '0' COMMENT '单个聚合数据的子配置大小上限，单位为字节，0表示使用默认值',
+       `max_history_count` int unsigned NOT NULL DEFAULT '0' COMMENT '最大变更历史数量',
+       `gmt_create` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+       `gmt_modified` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '修改时间',
+       PRIMARY KEY (`id`),
+       UNIQUE KEY `uk_tenant_id` (`tenant_id`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='租户容量信息表';
+
+    CREATE TABLE `tenant_info` (
+       `id` bigint NOT NULL AUTO_INCREMENT COMMENT 'id',
+       `kp` varchar(128) NOT NULL COMMENT 'kp',
+       `tenant_id` varchar(128) DEFAULT '' COMMENT 'tenant_id',
+       `tenant_name` varchar(128) DEFAULT '' COMMENT 'tenant_name',
+       `tenant_desc` varchar(256) DEFAULT NULL COMMENT 'tenant_desc',
+       `create_source` varchar(32) DEFAULT NULL COMMENT 'create_source',
+       `gmt_create` bigint NOT NULL COMMENT '创建时间',
+       `gmt_modified` bigint NOT NULL COMMENT '修改时间',
+       PRIMARY KEY (`id`),
+       UNIQUE KEY `uk_tenant_info_kptenantid` (`kp`,`tenant_id`),
+       KEY `idx_tenant_id` (`tenant_id`)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='tenant_info';
+
+    CREATE TABLE `users` (
+       `username` varchar(50) NOT NULL PRIMARY KEY COMMENT 'username',
+       `password` varchar(500) NOT NULL COMMENT 'password',
+       `enabled` boolean NOT NULL COMMENT 'enabled'
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE `roles` (
+       `username` varchar(50) NOT NULL COMMENT 'username',
+       `role` varchar(50) NOT NULL COMMENT 'role',
+       UNIQUE INDEX `idx_user_role` (`username` ASC, `role` ASC) USING BTREE
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+    CREATE TABLE `permissions` (
+       `role` varchar(50) NOT NULL COMMENT 'role',
+       `resource` varchar(128) NOT NULL COMMENT 'resource',
+       `action` varchar(8) NOT NULL COMMENT 'action',
+       UNIQUE INDEX `uk_role_permission` (`role`,`resource`,`action`) USING BTREE
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+---
+# Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-nacos
+  namespace: nacos
+spec:
+  ports:
+  - port: 3306
+  clusterIP: None
+  selector:
+    app: mysql-nacos
+
+---
+# NodePort Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-nacos-external
+  namespace: nacos
+spec:
+  type: NodePort
+  selector:
+    app: mysql-nacos
+  ports:
+  - port: 3306
+    targetPort: 3306
+
+---
+# MySQL StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-nacos
+  namespace: nacos
+spec:
+  selector:
+    matchLabels:
+      app: mysql-nacos
+  serviceName: "mysql-nacos"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mysql-nacos
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0.30
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-nacos-secret
+              key: ROOT_PASSWORD
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        - name: config
+          mountPath: /etc/mysql/conf.d
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: config
+        configMap:
+          name: mysql-nacos-config
+          items:
+          - key: my.cnf
+            path: my.cnf
+      - name: init-script
+        configMap:
+          name: mysql-nacos-config
+          items:
+          - key: init.sql
+            path: 1-init.sql
+          - key: mysql-schema.sql
+            path: 2-schema.sql
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi

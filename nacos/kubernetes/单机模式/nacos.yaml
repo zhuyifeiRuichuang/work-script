@@ -67,11 +67,11 @@ metadata:
   name: nacos-cm
   namespace: nacos
 data:
-  mysql.host: "192.168.100.33"
+  mysql.host: "mysql-nacos"
   mysql.db.name: "nacos"
   mysql.port: "3306"
-  mysql.user: "ruichuang"
-  mysql.password: "ON7q6Qp9@qKR@I"
+  mysql.user: "nacos"
+  mysql.password: "nacos"
   nacos.auth.token: "VGhpc0lzQVNlY3JldEtleUZvck5hY29zQXV0aFRva2VuSXNNb3JlVGhhbjMyQnl0ZXMK"
   nacos.auth.identity.key: "serverIdentity"
   nacos.auth.identity.value: "VGhpc0lzQUlkVmFsdWVGb3JOYWNvc0lkZW50aXR5VmVyaWZpY2F0aW9u"
@@ -103,8 +103,8 @@ spec:
               topologyKey: "kubernetes.io/hostname"
       containers:
         - name: nacos
-          imagePullPolicy: Always
-          image: nacos/nacos-server:latest
+          imagePullPolicy: IfNotPresent
+          image: nacos/nacos-server:v3.2.1
           resources:
             requests:
               memory: "2Gi"

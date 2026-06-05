@@ -1,16 +1,12 @@
 # 更新
 
-按照部署环境区分
+检查docker环境的可用性，规范文档和配置文件，实现compose文件一键部署，自动导入数据。
 
-docker和kubernetes
+检查k8s环境部署时标准配置，自动化配置。关联组件一起标准部署。
 
-只留下标准部署方案。
 
-docker的梳理现有的即可。
 
 k8s的参考`https://github.com/nacos-group/nacos-k8s.git`
-
-部署时，把所需的关联组件一起标准部署。
 
 
 
@@ -24,7 +20,7 @@ k8s的参考`https://github.com/nacos-group/nacos-k8s.git`
 
 访问测试
 
-写明确的版本，nacos的版本差异会使部署失败。
+所有组件都写明确的版本，不用latest，nacos的版本差异会使部署失败。
 
 
 
@@ -43,3 +39,6 @@ k8s的参考`https://github.com/nacos-group/nacos-k8s.git`
 
 
 
+# 资源说明
+
+在docker或kubernetes环境部署。

@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: seatunnel-internal
+spec:
+  selector:
+    app: seatunnel
+  ports:
+  - port: 5801
+    name: seatunnel
+  - port: 8080
+    name: seatunnel-web
+  clusterIP: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seatunnel-external
+spec:
+  selector:
+    app: seatunnel
+  type: NodePort
+  ports:
+  - port: 5801
+    targetPort: 5801
+    # nodePort: 30801
+    name: seatunnel
+  - port: 8080
+    targetPort: 8080
+    # nodePort: 30880
+    name: seatunnel-web
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: seatunnel
+  annotations:
+    configmap.reloader.stakater.com/reload: "hazelcast,hazelcast-client,seatunnelmap"
+spec:
+  serviceName: "seatunnel"
+  replicas: 3  # modify replicas according to your case
+  selector:
+    matchLabels:
+      app: seatunnel
+  template:
+    metadata:
+      labels:
+        app: seatunnel
+    spec:
+      containers:
+        - name: seatunnel
+          image: seatunnel:2.3.13
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5801
+              name: client
+          command: ["/bin/sh","-c","/opt/seatunnel/bin/seatunnel-cluster.sh -DJvmOption=-Xms2G -Xmx2G"]
+          resources:
+            limits:
+              cpu: "1"
+              memory: 4G
+            requests:
+              cpu: "1"
+              memory: 2G
+          volumeMounts:
+            - mountPath: "/opt/seatunnel/config/hazelcast.yaml"
+              name: hazelcast
+              subPath: hazelcast.yaml
+            - mountPath: "/opt/seatunnel/config/hazelcast-client.yaml"
+              name: hazelcast-client
+              subPath: hazelcast-client.yaml
+            - mountPath: "/opt/seatunnel/config/seatunnel.yaml"
+              name: seatunnelmap
+              subPath: seatunnel.yaml
+            - mountPath: /data/seatunnel.streaming.conf
+              name: seatunnel-config
+              subPath: seatunnel.streaming.conf
+      volumes:
+        - name: hazelcast
+          configMap:
+            name: hazelcast
+        - name: hazelcast-client
+          configMap:
+            name: hazelcast-client
+        - name: seatunnelmap
+          configMap:
+            name: seatunnelmap
+        - name: seatunnel-config
+          configMap:
+            name: seatunnel-config
+            items:
+            - key: seatunnel.streaming.conf
+              path: seatunnel.streaming.conf

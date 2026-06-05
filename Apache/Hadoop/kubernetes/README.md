@@ -3,6 +3,12 @@
 
 参考`https://github.com/stackabletech/hdfs-operator`
 
+
+
+operator处于开发阶段，不可在生产环境使用。
+
+
+
 ## 容器镜像
 推荐采用Hadoop官方镜像。
 案例采用定制的Hadoop v3.1.1  

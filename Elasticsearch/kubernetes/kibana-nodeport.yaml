@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana-nodeport
+spec:
+  type: NodePort
+  selector:
+    # 关键：匹配kibana的pod标签（从你截图里自动匹配）
+    common.k8s.elastic.co/type: kibana
+    kibana.k8s.elastic.co/name: kibana
+  ports:
+    - port: 5601        # 服务内部端口
+      targetPort: 5601  # 容器端口（kibana实际运行端口）
+      # nodePort: 30601   # 物理机访问端口（你可以自己改，范围30000-32767）

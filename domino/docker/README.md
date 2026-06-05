@@ -36,7 +36,7 @@ Domino组件
 
 将GitHub 获取的token填写到`.env`的`DOMINO_DEFAULT_PIECES_REPOSITORY_TOKEN`
 
-修改`compose.yaml`中`domino_frontend`的`API_URL`为主机IP。
+修改`compose.yaml`中`domino_frontend`的`API_URL`为主机IP，端口是rest组件的端口。
 
 创建专用部署目录，例如目录`/opt/domino`。
 

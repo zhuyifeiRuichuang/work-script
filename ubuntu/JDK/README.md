@@ -9,3 +9,5 @@ OpenJDK：[版本清单](https://jdk.java.net/archive/)
 
 # 部署JDK
 下载JDK的`tar.gz`文件到脚本所在目录，执行脚本`bash deploy.sh` 
+
+例如`jdk-8u481-linux-x64.tar.gz`

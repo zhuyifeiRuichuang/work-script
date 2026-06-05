@@ -1,0 +1,10 @@
+hazelcast-client:
+  cluster-name: seatunnel
+  properties:
+    hazelcast.logging.type: log4j2
+  network:
+    cluster-members:
+      # seatunnel的完整服务名字。
+      - seatunnel-0.seatunnel.seatunnel.svc.cluster.local:5801
+      - seatunnel-1.seatunnel.seatunnel.svc.cluster.local:5801
+      - seatunnel-2.seatunnel.seatunnel.svc.cluster.local:5801

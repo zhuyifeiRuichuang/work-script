@@ -1,0 +1,26 @@
+hazelcast:
+  cluster-name: seatunnel
+  network:
+    rest-api:
+      enabled: true
+      endpoint-groups:
+        CLUSTER_WRITE:
+          enabled: true
+        DATA:
+          enabled: true
+    join:
+      tcp-ip:
+        enabled: true
+        member-list:
+          # 填写所有seatunnel POD的完整服务名
+          - seatunnel-0.seatunnel.seatunnel.svc.cluster.local
+          - seatunnel-1.seatunnel.seatunnel.svc.cluster.local
+          - seatunnel-2.seatunnel.seatunnel.svc.cluster.local
+    port:
+      auto-increment: false
+      port: 5801
+  properties:
+    hazelcast.invocation.max.retry.count: 20
+    hazelcast.tcp.join.port.try.count: 30
+    hazelcast.logging.type: log4j2
+    hazelcast.operation.generic.thread.count: 50

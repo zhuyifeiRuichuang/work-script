@@ -6,16 +6,31 @@
 
 # 说明
 
-nacos在k8s环境部署
+在k8s环境部署单机版的nacos 3.2.1
 
-在k8s环境应优先部署集群模式。
+伪集群
+
+mysql的版本不准修改。nacos不支持高版本MySQL
+
+会因数据连接缺少`&allowPublicKeyRetrieval=true`导致连接失败。后续测试更新支持高版本MySQL。
 
 
 
 参考文档`https://nacos.io/docs/latest/quickstart/quick-start-kubernetes/?spm=5238cd80.5687ac34.0.0.74f0215fmrId3r`, nacos server v3.1
 
-# 创建MySQL数据库
-单独创建一个MySQL数据库，准备好MySQL的主机域名或者ip，端口号，账户，密码，提前创建一个数据库名字是`nacos`，编码`utf8mb4`，倒入`mysql-schema.sql`文件
+
+
+# 修改文件
+
+
+
+## 修改MySQL的文件
+
+
+
+## 修改nacos的文件
+
+
 
 # 修改nacos的yaml文件
 `nacos-k8s-v1.yaml`的`nacos-cm`部分，`mysql`配置改为上述配置的。  
@@ -26,8 +41,15 @@ nacos在k8s环境部署
 openssl rand -base64 48
 ```
 
+
+
+
+
 # 部署nacos
+
 ```bash
+kubectl create namespace nacos
+kubectl apply -f mysql-nacos.yaml -n nacos
 kubectl apply -f nacos-k8s-v1.yaml -n nacos
 ```
 
@@ -46,3 +68,12 @@ service/nacos-operator   ClusterIP   10.233.17.137   <none>        8080/TCP     
 NAME                     READY   AGE
 statefulset.apps/nacos   1/1     6m1s
 ```
+
+
+
+# 访问
+
+`IP:8080`，网络转发环境访问转发后的IP和端口。
+
+首次访问必须输入密码，推荐使用账户`nacos` ，密码`nacos`
+

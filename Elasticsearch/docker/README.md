@@ -44,6 +44,12 @@ MEM_LIMIT=1073741824
 
 `docker-compose.yml`来自`https://github.com/elastic/elasticsearch/blob/main/docs/reference/setup/install/docker/docker-compose.yml`
 
+
+
+参考
+
+`https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-docker-compose`
+
 # 部署
 
 ```bash
@@ -53,6 +59,10 @@ docker compose up -d
 # 访问
 
 浏览器访问`IP:5601`，默认账户`elastic`，默认密码是`.env`的`KIBANA_PASSWORD`的值。
+
+注意，账户密码是付费版的功能。
+
+
 
 # 进入容器
 
@@ -71,4 +81,8 @@ docker exec -it docker-es01-1 bash
 参考：`https://www.elastic.co/docs/reference/ingestion-tools`
 
 目录结构`https://www.elastic.co/docs/reference/beats/filebeat/directory-layout`
+
+# 已知故障
+
+免费版运行一段时间会因免费的license过期自动故障。暂未解决。
 

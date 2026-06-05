@@ -1,4 +1,11 @@
+# 更新
+
+v2需测试最子版本，当前配置在8.4.9里存在异常。
+
+
+
 # 说明
+
 在kubernetes环境部署和测试MySQL任意版本(必须是docker hub 有镜像的)。  
 yaml配置已将容器内`/var/lib/mysql`配置数据持久化到k8s集群的pvc。  
 单实例可以使用deployment类型部署，集群和主从需使用statefulset类型部署。  
