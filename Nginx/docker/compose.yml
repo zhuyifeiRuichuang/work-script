@@ -1,0 +1,44 @@
+
+services:
+  nginx:
+    image: nginx:1.31.1
+    container_name: nginx-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/conf.d:/etc/nginx/conf.d:ro
+      - ./html:/usr/share/nginx/html:ro
+      - ./logs:/var/log/nginx
+      - ./ssl:/etc/nginx/ssl:ro
+    environment:
+      - TZ=Asia/Shanghai
+
+    deploy:
+      resources:
+        # 最多可用资源
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        # 最少保证可用资源
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+    healthcheck:
+      # test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "curl -fs http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+      
+    networks:
+      - web_net
+
+networks:
+  web_net:
+    name: web-net
+    driver: bridge

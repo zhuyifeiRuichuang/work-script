@@ -81,6 +81,9 @@ kubectl create cm seatunnel-config --from-file=seatunnel.streaming.conf=seatunne
 kubectl create configmap hazelcast-client  --from-file=hazelcast-client.yaml -n seatunnel
 kubectl create configmap hazelcast  --from-file=hazelcast.yaml -n seatunnel
 kubectl create configmap seatunnelmap  --from-file=seatunnel.yaml -n seatunnel
+# 可选，用于日志持久化
+kubectl create configmap log4j2.properties --from-file=log4j2.properties -n seatunnel
+kubectl create configmap log4j2-client.properties --from-file=log4j2_client.properties -n seatunnel
 ```
 
 # 创建reloader
@@ -149,7 +152,7 @@ kubectl edit cm hazelcast-client
 
 单独配置了日志长期存储。
 
-配置了对接HDFS，即Hadoop的namenode
+配置了对接HDFS，即Hadoop的namenode:9000
 
 配置了单独的端口转发服务。
 

@@ -1,0 +1,172 @@
+# 基础镜像
+FROM ubuntu:25.10
+
+# 禁用交互式apt提示，避免构建时弹窗
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 核心环境变量配置（固定路径，无版本硬编码）
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+ENV HADOOP_HOME=/opt/hadoop
+ENV HIVE_HOME=/opt/hive
+ENV TEZ_HOME=/opt/tez
+ENV HIVE_LOG_DIR=/var/log/hive
+# 系统PATH整合
+ENV PATH="${JAVA_HOME}/bin:${HIVE_HOME}/bin:${HADOOP_HOME}/bin:${TEZ_HOME}/bin:${PATH}"
+
+# 替换apt源为阿里云镜像（加速中国地区构建）
+# Ubuntu 25.10 使用 deb822 格式的 sources 文件
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+
+# 第一步：安装基础依赖（修复envsubst依赖+语法错误）
+# 说明：envsubst属于gettext-base包，Ubuntu 22.04无独立envsubst包
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        openjdk-8-jdk \
+        sudo \
+        findutils \
+        gettext-base \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 第二步：复制software目录（所有压缩包/jar包统一存放）
+COPY software/ /tmp/software/
+
+# 第三步：解压软件包 + 核心问题修复（Guava/SLF4J）
+# 关键优化：处理set -eux下find命令的非0退出，扩展Guava删除范围
+RUN set -eux; \
+    # ===================== 解压Hadoop（必选，无包则构建失败）=====================
+    HADOOP_TAR=$(find /tmp/software -name "hadoop-*.tar.gz" -type f | head -n1); \
+    if [ -z "$HADOOP_TAR" ]; then echo "ERROR: 未找到Hadoop安装包"; exit 1; fi; \
+    tar -xzf "$HADOOP_TAR" -C /opt/ && \
+    mv /opt/hadoop-* /opt/hadoop && \
+    rm -rf /opt/hadoop/share/doc/*; \
+    \
+    # ===================== 解压Hive（必选，无包则构建失败）=====================
+    HIVE_TAR=$(find /tmp/software -name "apache-hive-*-bin.tar.gz" -type f | head -n1); \
+    if [ -z "$HIVE_TAR" ]; then echo "ERROR: 未找到Hive安装包"; exit 1; fi; \
+    tar -xzf "$HIVE_TAR" -C /opt/ && \
+    mv /opt/apache-hive-*-bin /opt/hive; \
+    # 先备份Hive原生的高版本Guava（避免被Tez的低版本覆盖）
+    HIVE_ORIG_GUAVA=$(find /opt/hive/lib -name "guava-*.jar" | head -n1); \
+    if [ -n "$HIVE_ORIG_GUAVA" ]; then \
+        cp -f "$HIVE_ORIG_GUAVA" /tmp/hive_guava_backup.jar; \
+    fi; \
+    \
+    # ===================== 解压Tez（可选，无包则跳过）=====================
+    TEZ_TAR=$(find /tmp/software -name "apache-tez-*-bin.tar.gz" -type f | head -n1); \
+    if [ -n "$TEZ_TAR" ]; then \
+        tar -xzf "$TEZ_TAR" -C /opt/ && \
+        mv /opt/apache-tez-*-bin /opt/tez && \
+        rm -rf /opt/tez/share/*; \
+        # 复制Tez依赖到Hive lib（会带入低版本Guava，后续删除）
+        cp $TEZ_HOME/*.jar $HIVE_HOME/lib/; \
+        cp $TEZ_HOME/lib/*.jar $HIVE_HOME/lib/; \
+    else \
+        echo "INFO: 未找到Tez安装包，跳过Tez相关处理"; \
+    fi; \
+    \
+    # ===================== 复制software下所有jar包到Hive lib =====================
+    cp /tmp/software/*.jar $HIVE_HOME/lib/; \
+    \
+    # ===================== 增强版Guava版本冲突修复（核心修复）=====================
+    # 1. 修复find命令：跳过不存在的目录，即使找不到也不退出（关键！）
+    #    -ignore_readdir_race：忽略目录读取竞争
+    #    || true：强制返回0，避免set -e终止脚本
+    find /opt/hadoop /opt/tez -name "guava-*.jar" -delete -ignore_readdir_race || true; \
+    # 2. 删除Hive lib里的所有Guava（包括Tez复制的低版本）
+    find /opt/hive/lib -name "guava-*.jar" -delete -ignore_readdir_race || true; \
+    # 3. 恢复Hive原生的高版本Guava
+    if [ -f "/tmp/hive_guava_backup.jar" ]; then \
+        cp -f /tmp/hive_guava_backup.jar /opt/hive/lib/; \
+        HIVE_GUAVA="/opt/hive/lib/$(basename /tmp/hive_guava_backup.jar)"; \
+        # 4. 复制高版本Guava到所有核心目录
+        cp -f "$HIVE_GUAVA" /opt/hadoop/share/hadoop/common/lib/; \
+        cp -f "$HIVE_GUAVA" /opt/hadoop/share/hadoop/hdfs/lib/; \
+        cp -f "$HIVE_GUAVA" /opt/hadoop/share/hadoop/mapreduce/lib/; \
+        cp -f "$HIVE_GUAVA" /opt/hadoop/share/hadoop/yarn/lib/; \
+        # 复制到Tez lib（若存在）
+        [ -d "$TEZ_HOME" ] && cp -f "$HIVE_GUAVA" /opt/tez/lib/; \
+        echo "✅ Guava版本统一完成：$(basename $HIVE_GUAVA)"; \
+        # 删除临时备份
+        rm -f /tmp/hive_guava_backup.jar; \
+    else \
+        echo "❌ 未找到Hive lib中的Guava包，构建失败！"; \
+        exit 1; \
+    fi; \
+    \
+    # ===================== SLF4J多绑定处理（仅清理Hive侧残留）=====================
+    # Hadoop 使用 SLF4J 1.7.x + slf4j-log4j12（Log4j 1.x），必须保留
+    # Hive 使用 SLF4J 2.x + log4j-slf4j-impl（Log4j 2），两者版本不同不冲突
+    # 仅清理 Hive lib 中可能残留的 slf4j-log4j12（来自 Tez 复制）
+    find /opt/hive/lib -name "slf4j-log4j12-*.jar" -delete -ignore_readdir_race || true; \
+    # 添加 log4j-1.2-api 桥接：将 Hadoop 中直接使用 Log4j 1.x API 的代码桥接到 Log4j2
+    LOG4J2_VER=$(find /opt/hive/lib -name "log4j-core-*.jar" | head -n1 | sed 's/.*log4j-core-\(.*\)\.jar/\1/'); \
+    if [ -n "$LOG4J2_VER" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends wget ca-certificates && \
+        wget -q "https://maven.aliyun.com/repository/public/org/apache/logging/log4j/log4j-1.2-api/${LOG4J2_VER}/log4j-1.2-api-${LOG4J2_VER}.jar" \
+            -O /opt/hive/lib/log4j-1.2-api-${LOG4J2_VER}.jar && \
+        echo "✅ log4j-1.2-api 桥接安装完成：log4j-1.2-api-${LOG4J2_VER}.jar"; \
+        apt-get purge -y wget && apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    \
+    # ===================== 清理临时文件（减小镜像体积）=====================
+    rm -rf /tmp/software /opt/*.tar.gz;
+
+# 第四步：复制配置文件和入口脚本
+COPY entrypoint.sh  /
+COPY conf           ${HIVE_HOME}/conf
+
+# 第五步：创建用户 + 权限修复（安全最佳实践）
+RUN set -eux; \
+    userdel -r ubuntu || true && \
+    groupdel ubuntu || true && \
+    rm -rf /home/ubuntu || true && \
+    # 创建hive用户组（gid=1000）
+    groupadd --gid 1000 hive; \
+    # 创建hive用户（uid=1000，主组hive，家目录/opt/hive）
+    useradd --uid 1000 --gid 1000 --home /opt/hive --create-home hive; \
+    # 配置hive用户免密sudo（避免权限不足）
+    echo "hive ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers; \
+    # 赋予入口脚本执行权限
+    chmod +x /entrypoint.sh; \
+    # 创建Hive运行所需目录（避免启动时缺失）
+    mkdir -p \
+        /opt/hive/data/warehouse \
+        /home/hive/.beeline \
+        ${HIVE_LOG_DIR} \
+        /data \
+        /tmp/hive \
+        /tmp/hive/_resultscache_; \
+    # 统一设置目录权限（hive用户可读写）
+    chown -R hive:hive \
+        /opt/hadoop \
+        /opt/hive \
+        /opt/tez \
+        ${HIVE_LOG_DIR} \
+        /data \
+        /home/hive \
+        /tmp/hive \
+        /opt; \
+    # 设置目录读写权限
+    chmod -R 755 \
+        /opt/hadoop \
+        /opt/hive \
+        /opt/tez \
+        ${HIVE_LOG_DIR} \
+        /data \
+        /home/hive \
+        /tmp/hive;
+
+# 恢复DEBIAN_FRONTEND默认值
+ENV DEBIAN_FRONTEND=dialog
+
+# 切换到hive用户（非root运行，符合安全规范）
+USER hive
+WORKDIR /opt/hive
+
+# 建议不配置：HS2(10000)、WebUI(10002)、Metastore(9083)
+# EXPOSE 10000 10002 9083
+
+# 入口脚本（使用exec保证信号传递，支持优雅停止）
+ENTRYPOINT ["/entrypoint.sh"]

@@ -4,6 +4,9 @@ seatunnel:
       enable-http: true
       port: 8080
     history-job-expire-minutes: 1440
+    telemetry:
+      logs:
+        scheduled-deletion-enable: false
     backup-count: 1
     queue-type: blockingqueue
     print-execution-info-interval: 60
@@ -17,6 +20,7 @@ seatunnel:
         type: hdfs
         max-retained: 3
         plugin-config:
-          namespace: /tmp/seatunnel/checkpoint_snapshot
+          namespace: /seatunnel/checkpoint_snapshot
           storage.type: hdfs
-          fs.defaultFS: file:///tmp/ # Ensure that the directory has written permission
+          # 若对接HDFS，需配置namenode完整服务名或IP,端口9000
+          fs.defaultFS: file://namenode.hadoop.svc.cluster.local:9000

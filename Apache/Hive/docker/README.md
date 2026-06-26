@@ -1,30 +1,28 @@
-# 更新计划
-
-后续改造为配置文件都放conf目录，挂载到容器内。
-
-
-
 # 说明
 
-容器环境部署Apache Hive及配套数据库。以docker为例。
+Docker环境部署Apache Hive及配套数据库。
 
 
 
 # 参考
 
->https://hub.docker.com/r/apache/hive
+```bash
+https://hub.docker.com/r/apache/hive
 https://hive.apache.org/development/quickstart/
+```
+
+
 
 # 部署文件说明
 
 Apache Hive的metastore通过对接数据库实现数据持久化存储，支持PostgreSQL，Oracle，MySQL，MsSQL。
 
-跟进业务需求选择需对接的数据库，可自定义数据库配置，默认采用常见生产环境单实例数据库标准配置。
 
-| 文件                    | 说明                             |
-| ----------------------- | -------------------------------- |
-| compose-PostgreSQL.yaml | 对接PostgreSQL数据库18及更高版本 |
-| MySQL                   | 对接MySQL数据库9及更高版本       |
+
+| 文件 | 说明                                   |
+| ---- | -------------------------------------- |
+| v1   | 对接MySQL8.4.9。对接Hadoop3.1.1。      |
+| v2   | 对接postgresql 18.4。对接Hadoop3.1.1。 |
 
 
 
@@ -40,12 +38,6 @@ hive组件的配置文件可单独管理。将配置文件存放在本地目录`
 或在`compose.yaml`中解除配置文件的注释。
 
 # 部署
-
-复制模板文件，检查配置，删除注释，确认可在部署环境使用。
-
-```bash
-cp compose-$(数据库名字).yaml compose.yaml
-```
 
 部署所有组件
 
@@ -73,27 +65,30 @@ docker compose down -v
 
 # 对接Hadoop
 
-对接Hadoop环境。
+默认已配置对接Hadoop，可在conf里做修改，对接其他Hadoop。
+
+# 部署后检查
+
+容器健康度检查。确认均显示healthy。
+
+## 测试访问Hadoop
+
+测试hive-metastore访问Hadoop
+
+```bash
+docker exec -it hive-metastore bash
+hdfs dfs -ls /
+hdfs dfs -mkdir -p /user/hive/warehouse
+hdfs dfs -ls /
+echo "hive test hadoop" > test.txt
+hdfs dfs -put test.txt /tmp/
+hdfs dfs -put test.txt /user/hive/warehouse
+hdfs dfs -ls /tmp/test.txt
+hdfs dfs -cat /tmp/test.txt
+hdfs dfs -rm /tmp/test.txt
+```
 
 
-
-# 访问测试
-
-确认各组件是否正常。
-
-容器状态健康。
-
-查看容器日志最新内容无异常信息。
-
-访问使用正常。
-
-## 数据库
-
-案例使用的postgreSQL，容器状态健康即正常。
-
-## meta store
-
-容器状态健康即正常。
 
 ## hive server2 组件
 

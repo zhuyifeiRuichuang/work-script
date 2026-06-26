@@ -11,7 +11,8 @@ networks:
 
 services:
   rabbitmq:
-    image: rabbitmq:4.2.5-management
+    # 注意：带management可访问15672进行web界面管理
+    image: rabbitmq:4.3.2-management
     container_name: rabbitmq
     hostname: rabbitmq
     restart: unless-stopped

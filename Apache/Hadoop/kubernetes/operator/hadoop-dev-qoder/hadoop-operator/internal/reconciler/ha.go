@@ -32,7 +32,7 @@ import (
 )
 
 // reconcileZooKeeper creates or updates ZooKeeper for HA coordination
-func (r *HadoopClusterReconciler) reconcileZooKeeper(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileZooKeeper(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Check if external ZooKeeper is configured
@@ -103,6 +103,8 @@ func (r *HadoopClusterReconciler) reconcileZooKeeper(ctx context.Context, cluste
 					Labels: r.labelsForZooKeeper(cluster),
 				},
 				Spec: corev1.PodSpec{
+					ImagePullSecrets:              cluster.Spec.Image.PullSecrets,
+					TerminationGracePeriodSeconds: int64Ptr(30),
 					Containers: []corev1.Container{
 						{
 							Name:            "zookeeper",
@@ -177,7 +179,7 @@ func (r *HadoopClusterReconciler) reconcileZooKeeper(ctx context.Context, cluste
 }
 
 // reconcileJournalNode creates or updates JournalNodes for HA
-func (r *HadoopClusterReconciler) reconcileJournalNode(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileJournalNode(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Only create JournalNodes if HA is enabled for NameNode
@@ -261,11 +263,20 @@ func (r *HadoopClusterReconciler) reconcileJournalNode(ctx context.Context, clus
 			Selector: &metav1.LabelSelector{
 				MatchLabels: r.labelsForJournalNode(cluster),
 			},
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: r.labelsForJournalNode(cluster),
+					Labels:      r.labelsForJournalNode(cluster),
+					Annotations: r.podTemplateAnnotations(ctx, cluster),
 				},
 				Spec: corev1.PodSpec{
+					ImagePullSecrets:              cluster.Spec.Image.PullSecrets,
+					TerminationGracePeriodSeconds: int64Ptr(30),
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: int64Ptr(1000),
+					},
 					Containers: []corev1.Container{
 						{
 							Name:            "journalnode",

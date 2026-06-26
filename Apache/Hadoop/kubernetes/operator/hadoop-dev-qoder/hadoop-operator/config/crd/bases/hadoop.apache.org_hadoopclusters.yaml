@@ -337,6 +337,10 @@ spec:
                   - type
                   type: object
                 type: array
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                format: int64
+                type: integer
               dataNode:
                 description: DataNode status
                 properties:

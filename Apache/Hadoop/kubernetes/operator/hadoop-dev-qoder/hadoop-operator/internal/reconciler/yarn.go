@@ -32,7 +32,7 @@ import (
 )
 
 // reconcileResourceManagerService creates or updates the ResourceManager service
-func (r *HadoopClusterReconciler) reconcileResourceManagerService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileResourceManagerService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Headless service for StatefulSet
@@ -113,7 +113,7 @@ func (r *HadoopClusterReconciler) reconcileResourceManagerService(ctx context.Co
 }
 
 // reconcileResourceManager creates or updates the ResourceManager StatefulSet
-func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileResourceManager(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	replicas := cluster.Spec.YARN.ResourceManager.Replicas
@@ -156,13 +156,22 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 			Selector: &metav1.LabelSelector{
 				MatchLabels: r.labelsForResourceManager(cluster),
 			},
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: r.labelsForResourceManager(cluster),
+					Labels:      r.labelsForResourceManager(cluster),
+					Annotations: r.podTemplateAnnotations(ctx, cluster),
 				},
 				Spec: corev1.PodSpec{
-					Affinity:    cluster.Spec.YARN.ResourceManager.Affinity,
-					Tolerations: cluster.Spec.YARN.ResourceManager.Tolerations,
+					ImagePullSecrets:                cluster.Spec.Image.PullSecrets,
+					Affinity:                        cluster.Spec.YARN.ResourceManager.Affinity,
+					Tolerations:                     cluster.Spec.YARN.ResourceManager.Tolerations,
+					TerminationGracePeriodSeconds:   int64Ptr(60),
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: int64Ptr(1000),
+					},
 					Containers: []corev1.Container{
 						{
 							Name:            "resourcemanager",
@@ -173,6 +182,14 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 								{
 									Name:  "HADOOP_CONF_DIR",
 									Value: "/opt/hadoop/etc/hadoop",
+								},
+								{
+									Name: "POD_NAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "metadata.name",
+										},
+									},
 								},
 							},
 							Ports: []corev1.ContainerPort{
@@ -186,6 +203,13 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 								},
 							},
 							Resources: resources,
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/bash", "-c", "sleep 10"},
+									},
+								},
+							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -193,8 +217,10 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 										Port: intstr.FromString("web"),
 									},
 								},
-								InitialDelaySeconds: 60,
+								InitialDelaySeconds: 90,
 								PeriodSeconds:       30,
+								TimeoutSeconds:      10,
+								FailureThreshold:    5,
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
@@ -205,11 +231,17 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 								},
 								InitialDelaySeconds: 30,
 								PeriodSeconds:       10,
+								TimeoutSeconds:      5,
+								FailureThreshold:    3,
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "hadoop-config",
 									MountPath: "/opt/hadoop/etc/hadoop",
+								},
+								{
+									Name:      "logs",
+									MountPath: "/opt/hadoop/logs",
 								},
 							},
 						},
@@ -223,6 +255,12 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 										Name: cluster.Name + "-config",
 									},
 								},
+							},
+						},
+						{
+							Name: "logs",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
 							},
 						},
 					},
@@ -240,7 +278,7 @@ func (r *HadoopClusterReconciler) reconcileResourceManager(ctx context.Context, 
 }
 
 // reconcileNodeManagerService creates or updates the NodeManager service
-func (r *HadoopClusterReconciler) reconcileNodeManagerService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileNodeManagerService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Headless service for StatefulSet
@@ -310,7 +348,7 @@ func (r *HadoopClusterReconciler) reconcileNodeManagerService(ctx context.Contex
 }
 
 // reconcileNodeManager creates or updates the NodeManager StatefulSet
-func (r *HadoopClusterReconciler) reconcileNodeManager(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileNodeManager(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	replicas := cluster.Spec.YARN.NodeManager.Replicas
@@ -351,13 +389,22 @@ func (r *HadoopClusterReconciler) reconcileNodeManager(ctx context.Context, clus
 			Selector: &metav1.LabelSelector{
 				MatchLabels: r.labelsForNodeManager(cluster),
 			},
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: r.labelsForNodeManager(cluster),
+					Labels:      r.labelsForNodeManager(cluster),
+					Annotations: r.podTemplateAnnotations(ctx, cluster),
 				},
 				Spec: corev1.PodSpec{
-					Affinity:    cluster.Spec.YARN.NodeManager.Affinity,
-					Tolerations: cluster.Spec.YARN.NodeManager.Tolerations,
+					ImagePullSecrets:              cluster.Spec.Image.PullSecrets,
+					Affinity:                      cluster.Spec.YARN.NodeManager.Affinity,
+					Tolerations:                   cluster.Spec.YARN.NodeManager.Tolerations,
+					TerminationGracePeriodSeconds: int64Ptr(30),
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: int64Ptr(1000),
+					},
 					InitContainers: []corev1.Container{
 						{
 							Name:            "wait-for-resourcemanager",
@@ -385,6 +432,14 @@ echo "ResourceManager is ready"
 									Name:  "HADOOP_CONF_DIR",
 									Value: "/opt/hadoop/etc/hadoop",
 								},
+								{
+									Name: "POD_NAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "metadata.name",
+										},
+									},
+								},
 							},
 							Ports: []corev1.ContainerPort{
 								{
@@ -393,6 +448,13 @@ echo "ResourceManager is ready"
 								},
 							},
 							Resources: resources,
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/bash", "-c", "sleep 10"},
+									},
+								},
+							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -402,6 +464,8 @@ echo "ResourceManager is ready"
 								},
 								InitialDelaySeconds: 60,
 								PeriodSeconds:       30,
+								TimeoutSeconds:      10,
+								FailureThreshold:    5,
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
@@ -412,11 +476,17 @@ echo "ResourceManager is ready"
 								},
 								InitialDelaySeconds: 30,
 								PeriodSeconds:       10,
+								TimeoutSeconds:      5,
+								FailureThreshold:    3,
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "hadoop-config",
 									MountPath: "/opt/hadoop/etc/hadoop",
+								},
+								{
+									Name:      "logs",
+									MountPath: "/opt/hadoop/logs",
 								},
 							},
 						},
@@ -430,6 +500,12 @@ echo "ResourceManager is ready"
 										Name: cluster.Name + "-config",
 									},
 								},
+							},
+						},
+						{
+							Name: "logs",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
 							},
 						},
 					},

@@ -32,7 +32,7 @@ import (
 )
 
 // reconcileDataNodeService creates or updates the DataNode service
-func (r *HadoopClusterReconciler) reconcileDataNodeService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileDataNodeService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Headless service for StatefulSet
@@ -113,7 +113,7 @@ func (r *HadoopClusterReconciler) reconcileDataNodeService(ctx context.Context, 
 }
 
 // reconcileDataNode creates or updates the DataNode StatefulSet
-func (r *HadoopClusterReconciler) reconcileDataNode(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileDataNode(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	replicas := cluster.Spec.HDFS.DataNode.Replicas
@@ -165,16 +165,22 @@ func (r *HadoopClusterReconciler) reconcileDataNode(ctx context.Context, cluster
 			Selector: &metav1.LabelSelector{
 				MatchLabels: r.labelsForDataNode(cluster),
 			},
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: r.labelsForDataNode(cluster),
+					Labels:      r.labelsForDataNode(cluster),
+					Annotations: r.podTemplateAnnotations(ctx, cluster),
 				},
 				Spec: corev1.PodSpec{
-					Affinity:    cluster.Spec.HDFS.DataNode.Affinity,
-					Tolerations: cluster.Spec.HDFS.DataNode.Tolerations,
+					ImagePullSecrets: cluster.Spec.Image.PullSecrets,
+					Affinity:         cluster.Spec.HDFS.DataNode.Affinity,
+					Tolerations:      cluster.Spec.HDFS.DataNode.Tolerations,
 					SecurityContext: &corev1.PodSecurityContext{
 						FSGroup: int64Ptr(1000),
 					},
+					TerminationGracePeriodSeconds: int64Ptr(30),
 					InitContainers: []corev1.Container{
 						{
 							Name:            "wait-for-namenode",
@@ -195,8 +201,7 @@ echo "NameNode is ready"
 							Image:           image,
 							ImagePullPolicy: cluster.Spec.Image.PullPolicy,
 							SecurityContext: &corev1.SecurityContext{
-								RunAsUser:  int64Ptr(0),
-								Privileged: boolPtr(true),
+								RunAsUser: int64Ptr(0),
 							},
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{`
@@ -234,6 +239,14 @@ echo "Permissions set"
 									Name:  "HADOOP_CONF_DIR",
 									Value: "/opt/hadoop/etc/hadoop",
 								},
+								{
+									Name: "POD_NAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "metadata.name",
+										},
+									},
+								},
 							},
 							Ports: []corev1.ContainerPort{
 								{
@@ -246,6 +259,13 @@ echo "Permissions set"
 								},
 							},
 							Resources: resources,
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/bash", "-c", "sleep 10"},
+									},
+								},
+							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -255,6 +275,8 @@ echo "Permissions set"
 								},
 								InitialDelaySeconds: 60,
 								PeriodSeconds:       20,
+								TimeoutSeconds:      10,
+								FailureThreshold:    5,
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
@@ -265,6 +287,8 @@ echo "Permissions set"
 								},
 								InitialDelaySeconds: 20,
 								PeriodSeconds:       10,
+								TimeoutSeconds:      5,
+								FailureThreshold:    3,
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
@@ -275,6 +299,10 @@ echo "Permissions set"
 								{
 									Name:      "hadoop-config",
 									MountPath: "/opt/hadoop/etc/hadoop",
+								},
+								{
+									Name:      "logs",
+									MountPath: "/opt/hadoop/logs",
 								},
 							},
 						},
@@ -288,6 +316,12 @@ echo "Permissions set"
 										Name: cluster.Name + "-config",
 									},
 								},
+							},
+						},
+						{
+							Name: "logs",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
 							},
 						},
 					},

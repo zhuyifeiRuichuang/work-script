@@ -1,30 +1,120 @@
-
 services:
   mysql8-single:
-    image: mysql:8.4.8
+    image: mysql:8.4.10
     container_name: mysql8-single
     restart: unless-stopped
+
+    # ------------------------------------------------------------
+    # 健康检查
+    # 密码从 secret 文件读取，不暴露在环境变量中
+    # CMD-SHELL 形式支持 shell 语法读取文件内容
+    # start_period 给大库/冷启动足够初始化时间
+    # ------------------------------------------------------------
     healthcheck:
-      # 备选 test: ["CMD-SHELL", "mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e 'SELECT 1'"]
-      test: mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e "SELECT 1"
-      interval: 10s
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$(cat /run/secrets/mysql_root_password)\" --silent 2>/dev/null || exit 1",
+        ]
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
+
+    # ------------------------------------------------------------
+    # 优雅停机 — InnoDB 需要时间刷脏页和关闭缓冲池
+    # 生产建议 60~120s，避免强制 SIGKILL 导致崩溃恢复
+    # ------------------------------------------------------------
+    stop_grace_period: 90s
+    stop_signal: SIGTERM
+
+    # ------------------------------------------------------------
+    # 资源限制（按 4C4G 服务器规格，按实际服务器调整）
+    # ------------------------------------------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4g
+        reservations:
+          cpus: "2"
+          memory: 2g
+
+    # ------------------------------------------------------------
+    # 端口映射 — 生产环境建议绑定具体内网 IP，避免公网暴露
+    # 若需仅本机访问改为 "127.0.0.1:3306:3306"
+    # ------------------------------------------------------------
     ports:
-      - "3306:3306"
+      - "0.0.0.0:3306:3306"
+
     volumes:
-      - ./my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./init-db:/docker-entrypoint-initdb.d:ro
       - mysql8-data:/var/lib/mysql
       - mysql8-log:/var/log/mysql
+
+    # tmpfs — /tmp 使用内存文件系统，加速临时表/排序操作
+    tmpfs:
+      - /tmp:size=512M,noexec,nosuid,nodev
+
+    # ------------------------------------------------------------
+    # Secrets — 密码通过文件注入，不写入容器环境变量
+    # docker inspect 中仅可见 secret 名称，无法看到密码内容
+    # ------------------------------------------------------------
+    secrets:
+      - mysql_root_password
+
     environment:
-      MYSQL_ROOT_PASSWORD: root123456
+      # MySQL 官方镜像支持 *_FILE 后缀变量，从指定文件读取密码
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       MYSQL_ROOT_HOST: "%"
       TZ: Asia/Shanghai
       LANG: C.UTF-8
+
+    # ------------------------------------------------------------
+    # 容器日志轮转 — 防止容器标准日志撑爆宿主机磁盘
+    # ------------------------------------------------------------
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+        tag: "mysql8-single"
+
+    # ------------------------------------------------------------
+    # 安全加固
+    # no-new-privileges：防止容器内进程提权
+    # ------------------------------------------------------------
+    security_opt:
+      - no-new-privileges:true
+
+    # ------------------------------------------------------------
+    # 文件描述符 & 进程数限制 — MySQL 高并发需要足够大的 ulimit
+    # ------------------------------------------------------------
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc:
+        soft: 65536
+        hard: 65536
+    networks:
+      - mysql-net
+
+# ------------------------------------------------------------
+# Secrets 定义 — 密码文件路径，仅宿主机本地文件，不进入镜像
+# ------------------------------------------------------------
+secrets:
+  mysql_root_password:
+    file: ./.root_password
 
 volumes:
   mysql8-data:
     name: mysql8-data
   mysql8-log:
     name: mysql8-log
+networks:
+  mysql-net:
+    name: mysql-net
+    driver: bridge
+

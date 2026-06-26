@@ -300,6 +300,9 @@ type HadoopClusterStatus struct {
 	Phase ClusterPhase `json:"phase,omitempty"`
 	// Conditions represent the latest available observations of the cluster state
 	Conditions []ClusterCondition `json:"conditions,omitempty"`
+	// ObservedGeneration is the most recent generation observed
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// NameNode status
 	// +optional
 	NameNode NameNodeStatus `json:"nameNode,omitempty"`

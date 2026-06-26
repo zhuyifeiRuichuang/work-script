@@ -1,4 +1,4 @@
-# 仅用于3.2.0版本。其他版本必须重新测试。
+# 仅用于3.2.2版本。其他版本必须重新测试。
 
 volumes:
   nacos-logs:
@@ -8,7 +8,7 @@ volumes:
 
 services:
   nacos:
-    image: nacos/nacos-server:v3.2.0
+    image: nacos/nacos-server:v3.2.2
     container_name: nacos-standalone-mysql
     env_file:
       - ./nacos.env
@@ -25,7 +25,7 @@ services:
 
   mysql:
     container_name: mysql-nacos
-    image: mysql:8.4.8
+    image: mysql:8.4.10
     restart: always
     env_file:
       - ./mysql.env

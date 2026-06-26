@@ -1,0 +1,108 @@
+
+services:
+  # MySQL 存储 Hive 元数据
+  hive-mysql:
+    image: mysql:8.4.9
+    container_name: hive-mysql
+    hostname: hive-mysql
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql-conf:/etc/mysql/conf.d
+      - mysql-data:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_secure_password
+      - MYSQL_DATABASE=hivedb
+      - MYSQL_USER=hiveuser
+      - MYSQL_PASSWORD=hivepassword
+    command: --max_connections=2000 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hive-network
+      - hadoop-net
+
+  # Hive Metastore 服务
+  hive-metastore:
+    # image: zhuyifeiruichuang/hive:3.1.2
+    image:  ccr.ccs.tencentyun.com/ruichuangdev/hive:dev
+    container_name: hive-metastore
+    hostname: hive-metastore
+    ports:
+      - "9083:9083"
+    depends_on:
+      hive-mysql:
+        condition: service_healthy
+    volumes:
+      - ./hadoop-conf:/opt/hadoop/etc/hadoop
+      - ./hive-conf:/opt/hive/conf
+    environment:
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+      - HIVE_CONF_DIR=/opt/hive/conf
+    user: "1001"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e 
+        echo "Checking and initializing Metastore Schema..."
+        hive --service schemaTool -dbType mysql -validate || \
+        hive --service schemaTool -dbType mysql -initSchema
+        echo "Metastore Schema is ready. Starting Metastore Service..."
+        hive --service metastore
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "ps -ef | grep HiveMetaStore | grep -v grep"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - hive-network
+      - hadoop-net
+
+  # HiveServer2 服务
+  hive-server2:
+    # image: zhuyifeiruichuang/hive:3.1.
+    image: ccr.ccs.tencentyun.com/ruichuangdev/hive:dev
+    container_name: hive-server2
+    hostname: hive-server2
+    ports:
+      - "10000:10000"   # JDBC 连接端口
+      - "10002:10002"   # HiveServer2 Web UI 端口
+    depends_on:
+      hive-metastore:
+        condition: service_started
+    volumes:
+      - ./hadoop-conf:/opt/hadoop/etc/hadoop
+      - ./hive-conf:/opt/hive/conf
+    environment:
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+      - HIVE_CONF_DIR=/opt/hive/conf
+    user: "1001"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        hive --service hiveserver2
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "ps -ef | grep HiveServer2 | grep -v grep"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 80s
+    networks:
+      - hive-network
+      - hadoop-net
+
+# 数据卷
+volumes:
+  mysql-data:
+
+networks:
+  hive-network:
+    driver: bridge
+  hadoop-net:
+    external: true
+    name: hadoop-net

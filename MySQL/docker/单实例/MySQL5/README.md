@@ -1,46 +1,29 @@
 # 说明
-部署MySQL5最新子版本单实例最佳实践。采用挂载`my.cnf`方法，快捷调整MySQL配置，配置数据卷实现数据存储持久化。  
+部署MySQL5.7.44单实例最佳实践。在生产环境不建议使用。
 
 # 参考文档
 `https://dev.mysql.com/doc/refman/5.7/en/`
 
 # 配置说明
-可根据业务需求修改本地的`my.cnf`，重启容器使配置生效。  
-对`deploy.sh`的说明如下，
-```bash
-#!/bin/bash
 
-# 部署容器
-docker run -d \
-# 定义容器名字
-  --name mysql5-single \
-  --restart unless-stopped \
-  # 物理端口:容器内端口
-  -p 3306:3306 \
-  -e TZ=Asia/Shanghai \
-  # MySQL初始化时root用户的密码
-  -e MYSQL_ROOT_PASSWORD=root123456 \
-  -e MYSQL_ROOT_HOST=% \
-  # 若使用本机目录，mysql5-data 改为目录绝对路径。
-  -v mysql5-data:/var/lib/mysql \
-  # my.cnf默认在当前目录，可以存放在指定目录，改$(pwd)/my.cnf 为真实绝对路径。
-  -v $(pwd)/my.cnf:/etc/mysql/conf.d/my.cnf \
-  --health-cmd='mysqladmin ping -h127.0.0.1 -P3306 -uroot -p"root123456" --silent' \
-  --health-interval=10s \
-  --health-timeout=5s \
-  --health-retries=3 \
-  --health-start-period=30s \
-  mysql:5.7.44
-```
+目录`init-db`存放数据库初始化需要执行的脚本。例如创建专用的数据库，创建专用的账户及访问权限，导入指定的SQL文件到指定的已创建的数据库。当有多个SQL文件时，文件名使用类似`01-aaa.sql`，`02-aaa.sql`的命名方式，控制执行SQL文件的顺序。
 
+文件`.root_password`配置root用户密码。
+
+`compose.yaml`和`my.cnf`可根据业务需求调整。
+
+特殊情况说明：
+
+当导入大量文件时，需将健康检查配置的更晚，更久一些，避免导入数据进行中导致的健康检查失败。
 
 # 部署
-## 联网部署
-容器镜像加速下载可参考`1ms.run`
+```bash
+docker compose up -d
+```
+
+# 访问测试
 
 ```bash
-bash deploy.sh
+docker exec -it mysql5-single mysql -uroot -p"$(cat /opt/mysql/.root_password)"
 ```
-## 离线部署
 
-下载容器镜像，打包容器镜像为文件，导入镜像到部署环境。执行部署脚本。

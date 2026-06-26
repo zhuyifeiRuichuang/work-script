@@ -5,6 +5,12 @@
 
 可在中国网络环境操作，容器镜像网络加速可参考`1ms.run`  
 
+参考文档`https://hadoop.apache.org/docs/current/hadoop-project-dist/hadoop-common/HadoopDocker.html`
+
+参考Dockerfile`https://github.com/apache/hadoop/tree/docker-hadoop-runner-latest`
+
+
+
 # 思路
 Hadoop官方指导的镜像构建流程是打包代码，构建基础镜像，构建Hadoop容器镜像。
 
@@ -85,3 +91,7 @@ vim compose.yaml
 docker compose up -d
 docker compose ps -a
 ```
+
+# 可用容器镜像
+
+`https://cnb.cool/zhudev-2025/apache-hadoop-dev`

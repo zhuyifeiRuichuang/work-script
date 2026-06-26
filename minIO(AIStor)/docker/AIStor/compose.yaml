@@ -25,6 +25,24 @@ services:
         max-size: 10m
         max-file: "3"
     command: minio server /mnt/data --license /minio.license
+    deploy:
+      resources:
+        # 最大可用
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        # 最少保证可用
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    networks:
+      - aistor-net
+
+networks:
+  aistor-net:
+    name: aistor-net
+    driver: bridge
+    
 #volumes:
 #  aistor-data:
 #    name: aistor-data

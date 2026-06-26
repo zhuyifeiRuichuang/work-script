@@ -1,0 +1,128 @@
+volumes:
+  hadoop-nn-data:
+    name: hadoop-nn-data
+  hadoop-dn-data:
+    name: hadoop-dn-data
+networks:
+  hadoop:
+    name: hadoop-net
+    driver: bridge
+
+services:
+  namenode:
+    image: zhuyifeiruichuang/hadoop:3.1.1
+    hostname: namenode
+    container_name: hadoop-namenode
+    command: ["sh", "-c", "sudo mkdir -p /opt/hadoop/data/nn && sudo chown -R hadoop:hadoop /opt/hadoop/data && if [ ! -d /opt/hadoop/data/nn/current ]; then echo 'Formatting NameNode...' && hdfs namenode -format; fi && hdfs namenode"]
+    ports:
+      - 9870:9870
+      - 9000:9000
+    env_file:
+      - ./config
+    environment:
+      ENSURE_NAMENODE_DIR: "/opt/hadoop/data/nn"
+    volumes:
+      - hadoop-nn-data:/opt/hadoop/data/nn
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9870 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - hadoop
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+  datanode:
+    image: zhuyifeiruichuang/hadoop:3.1.1
+    hostname: datanode
+    container_name: hadoop-datanode
+    command: ["sh", "-c", "sudo mkdir -p /opt/hadoop/data/dn && sudo chown -R hadoop:hadoop /opt/hadoop/data && hdfs datanode"]
+    env_file:
+      - ./config
+    ports:
+      - 9866:9866
+      - 9864:9864
+    volumes:
+      - hadoop-dn-data:/opt/hadoop/data/dn
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - namenode
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9864 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - hadoop
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+  resourcemanager:
+    image: zhuyifeiruichuang/hadoop:3.1.1
+    hostname: resourcemanager
+    container_name: hadoop-resourcemanager
+    command: ["yarn", "resourcemanager"]
+    ports:
+      - 8088:8088
+      - 8032:8032
+    env_file:
+      - ./config
+    depends_on:
+      - namenode
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "yarn rmadmin -checkHealth || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - hadoop
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+  nodemanager:
+    hostname: nodemanager
+    image: zhuyifeiruichuang/hadoop:3.1.1
+    container_name: hadoop-nodemanager
+    command: ["yarn", "nodemanager"]
+    env_file:
+      - ./config
+    ports:
+      - 8042:8042
+    depends_on:
+      - resourcemanager
+      - namenode
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8042 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - hadoop
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G

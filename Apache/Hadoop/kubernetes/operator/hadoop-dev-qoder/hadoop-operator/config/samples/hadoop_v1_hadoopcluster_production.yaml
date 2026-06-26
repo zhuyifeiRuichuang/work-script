@@ -17,17 +17,19 @@
 
 # 生产环境高可用 Hadoop 集群配置示例
 # Production-ready HA Hadoop Cluster Configuration
-# 
+#
 # 特性说明：
-# - NameNode HA: 2个NameNode实例，自动故障转移
+# - NameNode HA: 2个NameNode实例 + 3个JournalNode，自动故障转移
 # - ResourceManager HA: 2个ResourceManager实例
-# - JournalNode: 3个实例用于元数据同步
+# - ZooKeeper: 自动部署3节点集群（或配置外部ZooKeeper）
 # - DataNode: 3个实例，数据3副本
 # - NodeManager: 3个实例
 # - Pod反亲和性：确保组件分布在不同节点
-# - 资源限制：合理的CPU/内存配置
-# - 持久化存储：使用StorageClass提供持久化
-# - 监控集成：启用Prometheus监控
+# - PodDisruptionBudget: 保证滚动更新时的可用性
+# - 配置变更自动滚动重启（通过 ConfigMap hash 注解）
+# - 优雅终止（PreStop hook + TerminationGracePeriod）
+# - 持久化存储 + 合理的资源配置
+# - Prometheus 监控集成
 
 apiVersion: hadoop.apache.org/v1
 kind: HadoopCluster
@@ -44,12 +46,15 @@ spec:
     repository: apache/hadoop
     tag: "3.3.6"
     pullPolicy: IfNotPresent
-  
+
   hdfs:
     nameNode:
       replicas: 2
       ha:
         enabled: true
+        # 如需使用外部 ZooKeeper，取消下面的注释
+        # zookeeper:
+        #   connectionString: "zk1.example.com:2181,zk2.example.com:2181,zk3.example.com:2181"
         journalNode:
           replicas: 3
           resources:
@@ -81,13 +86,13 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchExpressions:
-              - key: app.kubernetes.io/component
+              - key: app
                 operator: In
                 values:
-                - namenode
+                - hadoop-namenode
             topologyKey: kubernetes.io/hostname
       tolerations: []
-    
+
     dataNode:
       replicas: 3
       resources:
@@ -108,12 +113,12 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchExpressions:
-              - key: app.kubernetes.io/component
+              - key: app
                 operator: In
                 values:
-                - datanode
+                - hadoop-datanode
             topologyKey: kubernetes.io/hostname
-  
+
   yarn:
     resourceManager:
       replicas: 2
@@ -133,12 +138,12 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchExpressions:
-              - key: app.kubernetes.io/component
+              - key: app
                 operator: In
                 values:
-                - resourcemanager
+                - hadoop-resourcemanager
             topologyKey: kubernetes.io/hostname
-    
+
     nodeManager:
       replicas: 3
       resources:
@@ -155,12 +160,12 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchExpressions:
-              - key: app.kubernetes.io/component
+              - key: app
                 operator: In
                 values:
-                - nodemanager
+                - hadoop-nodemanager
             topologyKey: kubernetes.io/hostname
-  
+
   config:
     coreSite:
       "hadoop.tmp.dir": "/opt/hadoop/tmp"
@@ -169,28 +174,16 @@ spec:
       "hadoop.security.authorization": "false"
     hdfsSite:
       "dfs.replication": "3"
-      "dfs.blocksize": "128m"
+      "dfs.blocksize": "134217728"
       "dfs.namenode.handler.count": "100"
       "dfs.datanode.handler.count": "10"
       "dfs.datanode.max.transfer.threads": "4096"
       "dfs.permissions.enabled": "true"
       "dfs.webhdfs.enabled": "true"
       "dfs.namenode.acls.enabled": "true"
-      "dfs.namenode.datanode.registration.ip-hostname-check": "false"
       "dfs.client.block.write.retries": "3"
-      "dfs.client.max.block.acquire.failures": "3"
-      # HA配置
-      "dfs.nameservices": "hadoop-production"
-      "dfs.ha.namenodes.hadoop-production": "nn0,nn1"
-      "dfs.namenode.rpc-address.hadoop-production.nn0": "hadoop-production-namenode-0.hadoop-production-namenode.hadoop.svc.cluster.local:8020"
-      "dfs.namenode.rpc-address.hadoop-production.nn1": "hadoop-production-namenode-1.hadoop-production-namenode.hadoop.svc.cluster.local:8020"
-      "dfs.namenode.http-address.hadoop-production.nn0": "hadoop-production-namenode-0.hadoop-production-namenode.hadoop.svc.cluster.local:9870"
-      "dfs.namenode.http-address.hadoop-production.nn1": "hadoop-production-namenode-1.hadoop-production-namenode.hadoop.svc.cluster.local:9870"
-      "dfs.client.failover.proxy.provider.hadoop-production": "org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider"
-      "dfs.ha.fencing.methods": "shell(/bin/true)"
-      "dfs.ha.automatic-failover.enabled": "true"
+      # 注意: HA 相关配置（nameservices, ha.namenodes 等）由 Operator 自动生成
     yarnSite:
-      "yarn.resourcemanager.hostname": "hadoop-production-resourcemanager"
       "yarn.resourcemanager.scheduler.class": "org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler"
       "yarn.scheduler.minimum-allocation-mb": "1024"
       "yarn.scheduler.maximum-allocation-mb": "8192"
@@ -201,33 +194,12 @@ spec:
       "yarn.nodemanager.pmem-check-enabled": "false"
       "yarn.nodemanager.vmem-check-enabled": "false"
       "yarn.nodemanager.aux-services": "mapreduce_shuffle"
-      "yarn.nodemanager.aux-services.mapreduce.shuffle.class": "org.apache.hadoop.mapred.ShuffleHandler"
+      "yarn.nodemanager.aux-services.mapreduce_shuffle.class": "org.apache.hadoop.mapred.ShuffleHandler"
       "yarn.log-aggregation-enable": "true"
       "yarn.log-aggregation.retain-seconds": "604800"
-      "yarn.log.server.url": "http://hadoop-production-jobhistory:19888/jobhistory/logs"
-      # HA配置
-      "yarn.resourcemanager.ha.enabled": "true"
-      "yarn.resourcemanager.cluster-id": "yarn-cluster"
-      "yarn.resourcemanager.ha.rm-ids": "rm0,rm1"
-      "yarn.resourcemanager.hostname.rm0": "hadoop-production-resourcemanager-0"
-      "yarn.resourcemanager.hostname.rm1": "hadoop-production-resourcemanager-1"
-      "yarn.resourcemanager.webapp.address.rm0": "hadoop-production-resourcemanager-0:8088"
-      "yarn.resourcemanager.webapp.address.rm1": "hadoop-production-resourcemanager-1:8088"
-      "yarn.resourcemanager.scheduler.address.rm0": "hadoop-production-resourcemanager-0:8030"
-      "yarn.resourcemanager.scheduler.address.rm1": "hadoop-production-resourcemanager-1:8030"
-      "yarn.resourcemanager.resource-tracker.address.rm0": "hadoop-production-resourcemanager-0:8031"
-      "yarn.resourcemanager.resource-tracker.address.rm1": "hadoop-production-resourcemanager-1:8031"
-      "yarn.resourcemanager.address.rm0": "hadoop-production-resourcemanager-0:8032"
-      "yarn.resourcemanager.address.rm1": "hadoop-production-resourcemanager-1:8032"
-      "yarn.resourcemanager.admin.address.rm0": "hadoop-production-resourcemanager-0:8033"
-      "yarn.resourcemanager.admin.address.rm1": "hadoop-production-resourcemanager-1:8033"
-      "yarn.resourcemanager.zk-address": "hadoop-production-zookeeper:2181"
+      # 注意: HA 相关配置（rm-ids, hostname.rm* 等）由 Operator 自动生成
     mapredSite:
       "mapreduce.framework.name": "yarn"
-      "mapreduce.jobhistory.address": "hadoop-production-jobhistory:10020"
-      "mapreduce.jobhistory.webapp.address": "hadoop-production-jobhistory:19888"
-      "mapreduce.jobhistory.done-dir": "/history/done"
-      "mapreduce.jobhistory.intermediate-done-dir": "/history/done_intermediate"
       "mapreduce.map.memory.mb": "2048"
       "mapreduce.reduce.memory.mb": "4096"
       "mapreduce.map.java.opts": "-Xmx1638m"
@@ -235,24 +207,17 @@ spec:
     capacityScheduler:
       "yarn.scheduler.capacity.maximum-applications": "10000"
       "yarn.scheduler.capacity.maximum-am-resource-percent": "0.1"
-      "yarn.scheduler.capacity.resource-calculator": "org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator"
       "yarn.scheduler.capacity.root.queues": "default"
       "yarn.scheduler.capacity.root.default.capacity": "100"
-      "yarn.scheduler.capacity.root.default.user-limit-factor": "1"
       "yarn.scheduler.capacity.root.default.maximum-capacity": "100"
       "yarn.scheduler.capacity.root.default.state": "RUNNING"
-      "yarn.scheduler.capacity.root.default.acl_submit_applications": "*"
-      "yarn.scheduler.capacity.root.default.acl_administer_queue": "*"
-      "yarn.scheduler.capacity.node-locality-delay": "40"
-      "yarn.scheduler.capacity.queue-mappings": ""
-      "yarn.scheduler.capacity.queue-mappings-override.enable": "false"
-  
+
   security:
     kerberos:
       enabled: false
     tls:
       enabled: false
-  
+
   metrics:
     enabled: true
     exporterImage: "prometheus/jmx-exporter:0.20.0"

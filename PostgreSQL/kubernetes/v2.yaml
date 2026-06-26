@@ -1,86 +1,129 @@
+# 创建专用secret
+# kubectl create secret generic pg-secret --from-literal=password='你的强密码' -n postgres
+
+# 1. 动态配置文件
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pg-config
+data:
+  postgresql.conf: |
+    # ------------------------------------------------------------------
+    # 连接与内存设置
+    # ------------------------------------------------------------------
+    max_connections = 200
+    shared_buffers = 2GB              # 建议设置为服务器物理内存的 25%
+    effective_cache_size = 6GB        # 建议设置为服务器物理内存的 50%-75%
+    work_mem = 16MB                   # 复杂查询的排序/哈希内存，根据并发量调整
+    maintenance_work_mem = 256MB      # 用于 VACUUM, CREATE INDEX 等操作
+    
+    # ------------------------------------------------------------------
+    # Checkpoint 与 WAL 性能优化
+    # ------------------------------------------------------------------
+    checkpoint_timeout = 15min        # 减少 IO 频繁度
+    checkpoint_completion_target = 0.9 # 平滑 Checkpoint IO 压力
+    wal_buffers = 16MB                # 默认值，高并发下可增加至 64MB
+    
+    # ------------------------------------------------------------------
+    # 日志与性能监控
+    # ------------------------------------------------------------------
+    log_min_duration_statement = 500  # 记录所有执行时间超过 500ms 的查询
+    log_checkpoints = on
+    log_connections = on
+    log_disconnections = on
+    log_lock_waits = on
+    
+    # ------------------------------------------------------------------
+    # 针对 PostgreSQL 17 的新特性优化
+    # ------------------------------------------------------------------
+    # Postgres 17 改进了增量备份和索引扫描性能
+    # 确保以下参数开启以支持高效查询
+    random_page_cost = 1.1            # 如果使用 SSD，设置为 1.1，HDD 设置为 4.0
+    effective_io_concurrency = 200    # SSD 推荐 200-300
+
+---
+
+# 2. 数据库服务 (Headless Service)
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgres-hive-db-internal
-  namespace: bigdata4
-  labels:
-    app: postgres-hive-db
+  name: postgres-internal
 spec:
   ports:
-    - port: 5432
-      targetPort: 5432
-      name: postgres
-  clusterIP: None
+  - port: 5432
   selector:
-    app: postgres-hive-db
+    app: postgres
+  clusterIP: None
 ---
-# 2. 集群外访问Service（NodePort类型）
+
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgres-hive-db-external
-  namespace: bigdata4
-  labels:
-    app: postgres-hive-db
+  name: postgres-nodeport
 spec:
   type: NodePort
-  ports:
-    - port: 5432
-      targetPort: 5432
-        #nodePort: 30432
-      name: postgres
   selector:
-    app: postgres-hive-db
+    app: postgres # 必须与 StatefulSet 中的 labels 匹配
+  ports:
+    - port: 5432         # Service 内部端口
+      targetPort: 5432   # 容器内部端口
+      # nodePort: 30432    # 外部访问端口 (范围必须在 30000-32767 之间)
+      protocol: TCP
 ---
-# StatefulSet配置
+
+# 3. 数据库主程序 (StatefulSet)
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: postgres-hive-db
-  namespace: bigdata4
+  name: postgres
 spec:
-  serviceName: postgres-hive-db-internal
+  serviceName: "postgres-internal"
   replicas: 1
   selector:
     matchLabels:
-      app: postgres-hive-db
+      app: postgres
   template:
     metadata:
       labels:
-        app: postgres-hive-db
+        app: postgres
     spec:
       containers:
       - name: postgres
-        image: postgres:17
-        imagePullPolicy: IfNotPresent
-        env:
-          - name: POSTGRES_DB
-            value: "hivedb"
-          - name: POSTGRES_USER
-            value: "hiveuser"
-          - name: POSTGRES_PASSWORD
-            value: "hivepassword"
+        image: postgres:17.10
         ports:
         - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: mydb
+        - name: POSTGRES_USER
+          value: admin
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pg-secret
+              key: password
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
         volumeMounts:
-        - name: postgres-data
+        - name: pg-data
           mountPath: /var/lib/postgresql/data
-        livenessProbe:
-          exec:
-            command: ["pg_isready", "-U", "hiveuser", "-d", "hivedb"]
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          exec:
-            command: ["pg_isready", "-U", "hiveuser", "-d", "hivedb"]
-          initialDelaySeconds: 5
-          periodSeconds: 5
+        - name: config-volume
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
+      volumes:
+      - name: config-volume
+        configMap:
+          name: pg-config
   volumeClaimTemplates:
   - metadata:
-      name: postgres-data
+      name: pg-data
     spec:
       accessModes: [ "ReadWriteOnce" ]
-      storageClassName: "local"
       resources:
         requests:
-          storage: 5Gi
+          storage: 20Gi

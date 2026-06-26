@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	hadoopv1 "github.com/apache/hadoop-operator/api/v1"
-	"github.com/apache/hadoop-operator/internal/controller"
+	"github.com/apache/hadoop-operator/internal/reconciler"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -122,7 +122,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.HadoopClusterReconciler{
+	if err = (&reconciler.HadoopClusterReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("hadoop-operator"),

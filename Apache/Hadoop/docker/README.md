@@ -2,14 +2,18 @@
 
 配置文件挂载到容器内指定位置。更精确管理配置文件。
 
-
-
 # 说明
 
 在docker环境部署Hadoop任意版本。
 以Hadoop v3.1.1为例展示操作步骤。
 
 参考`https://hadoop.apache.org/docs/stable/hadoop-yarn/hadoop-yarn-site/DockerContainers.html`
+
+# 配置说明
+
+目录v1是Hadoop原版。
+
+目录v2是改造版，推荐使用。已做配置优化。
 
 ## 数据持久化
 数据持久化通过数据卷挂载容器指定目录方式实现。 重建容器后，docker自动将数据卷挂载回容器指定目录，重新读取原数据。

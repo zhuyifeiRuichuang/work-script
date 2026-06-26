@@ -1,21 +1,107 @@
 services:
   fe:
-    image: apache/doris:fe-4.0.5
+    image: apache/doris:fe-4.1.1
+    container_name: fe
     hostname: fe
-    container_name: doris-fe
+    restart: unless-stopped
+    ports:
+      - 8030:8030
+      - 9030:9030
+    environment:
+      - FE_SERVERS=fe1:192.21.90.101:9010
+      - FE_ID=1
+      - TZ=Asia/Shanghai
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16G
+    networks:
+      doris-net:
+        ipv4_address: 192.21.90.101
+
+  be1:
+    image: apache/doris:be-4.1.1
+    hostname: be1
+    container_name: be1
     restart: unless-stopped
     environment:
-     - FE_SERVERS=fe1:127.0.0.1:9010
-     - FE_ID=1
-    network_mode: host
-  be:
-    image: apache/doris:be-4.0.5
-    hostname: be
-    container_name: doris-be
-    restart: unless-stopped
-    environment:
-     - FE_SERVERS=fe1:127.0.0.1:9010
-     - BE_ADDR=127.0.0.1:9050
+      - FE_SERVERS=fe1:192.21.90.101:9010
+      - BE_ADDR=192.21.90.102:9050
+      - TZ=Asia/Shanghai
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       - fe
-    network_mode: host
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+    ports:
+      - 9050:9050   # BE 通信端口
+      - 8040:8040   # BE Web UI
+    networks:
+      doris-net:
+        ipv4_address: 192.21.90.102
+
+  # be2:
+  #   image: apache/doris:be-4.1.1
+  #   hostname: be2
+  #   container_name: be2
+  #   restart: unless-stopped
+  #   environment:
+  #     - FE_SERVERS=fe1:192.21.90.101:9010
+  #     - BE_ADDR=192.21.90.103:9050
+  #     - TZ=Asia/Shanghai
+  #   volumes:
+  #     - /etc/localtime:/etc/localtime:ro
+  #   depends_on:
+  #     - fe
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '4'
+  #         memory: 8G
+  #   ports:
+  #     - 9050:9050   # BE 通信端口
+  #     - 8040:8040   # BE Web UI
+  #   networks:
+  #     doris-net:
+  #       ipv4_address: 192.21.90.103
+
+  # be3:
+  #   image: apache/doris:be-4.1.1
+  #   hostname: be3
+  #   container_name: be3
+  #   restart: unless-stopped
+  #   environment:
+  #     - FE_SERVERS=fe1:192.21.90.101:9010
+  #     - BE_ADDR=192.21.90.104:9050
+  #     - TZ=Asia/Shanghai
+  #   volumes:
+  #     - /etc/localtime:/etc/localtime:ro
+  #   depends_on:
+  #     - fe
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '4'
+  #         memory: 8G
+  #   ports:
+  #     - 9050:9050   # BE 通信端口
+  #     - 8040:8040   # BE Web UI
+  #   networks:
+  #     doris-net:
+  #       ipv4_address: 192.21.90.104
+
+networks:
+  doris-net:
+    name: doris-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.21.90.0/24
+          gateway: 192.21.90.1

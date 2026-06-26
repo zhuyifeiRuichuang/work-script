@@ -1,0 +1,116 @@
+---
+# 1. 内部访问的 ClusterIP Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: aistor-clusterip
+  labels:
+    app: aistor
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  selector:
+    app: aistor
+
+---
+# 2. 外部访问的 NodePort Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: aistor-nodeport
+  labels:
+    app: aistor
+spec:
+  type: NodePort
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+      # nodePort: 30000  # 可根据你集群的 NodePort 范围(通常为 30000-32767)进行修改
+    - name: console
+      port: 9001
+      targetPort: 9001
+      # nodePort: 30001
+  selector:
+    app: aistor
+
+---
+# 3. 核心应用: StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: aistor-server
+spec:
+  serviceName: "aistor-clusterip"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aistor
+  template:
+    metadata:
+      labels:
+        app: aistor
+    spec:
+      containers:
+      - name: aistor-server
+        image: quay.io/minio/aistor/minio:latest
+        imagePullPolicy: IfNotPresent
+        # 使用数组格式定义命令，并将挂载路径对齐到 Secret 的挂载点
+        command: 
+          - minio
+          - server
+          - /mnt/data
+          - --license
+          - /minio/license/minio.license
+        ports:
+        - containerPort: 9000
+          name: api
+        - containerPort: 9001
+          name: console
+        
+        # 将 Compose 的 healthcheck 转换为原生的 Liveness 和 Readiness 探针
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+          
+        volumeMounts:
+        - name: aistor-data
+          mountPath: /mnt/data
+        - name: license-volume
+          mountPath: /minio/license
+          readOnly: true
+          
+      volumes:
+      # 引用我们在第一步创建的 Secret
+      - name: license-volume
+        secret:
+          secretName: aistor-license
+          
+  # 动态持久卷声明 (PVC)
+  volumeClaimTemplates:
+  - metadata:
+      name: aistor-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "local"  # 绑定你现有的 local StorageClass
+      resources:
+        requests:
+          storage: 100Gi         # 注意：请务必根据实际磁盘规划修改此容量

@@ -18,7 +18,6 @@ package reconciler
 
 import (
 	"context"
-	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,7 +32,7 @@ import (
 )
 
 // reconcileNameNodeService creates or updates the NameNode service
-func (r *HadoopClusterReconciler) reconcileNameNodeService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileNameNodeService(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Headless service for StatefulSet
@@ -114,7 +113,7 @@ func (r *HadoopClusterReconciler) reconcileNameNodeService(ctx context.Context, 
 }
 
 // reconcileNameNode creates or updates the NameNode StatefulSet
-func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
+func (r *HadoopClusterReconciler) ReconcileNameNode(ctx context.Context, cluster *hadoopv1.HadoopCluster) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	replicas := cluster.Spec.HDFS.NameNode.Replicas
@@ -169,13 +168,22 @@ func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster
 			Selector: &metav1.LabelSelector{
 				MatchLabels: r.labelsForNameNode(cluster),
 			},
+			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
+				Type: appsv1.RollingUpdateStatefulSetStrategyType,
+			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: r.labelsForNameNode(cluster),
+					Labels:      r.labelsForNameNode(cluster),
+					Annotations: r.podTemplateAnnotations(ctx, cluster),
 				},
 				Spec: corev1.PodSpec{
-					Affinity:    cluster.Spec.HDFS.NameNode.Affinity,
-					Tolerations: cluster.Spec.HDFS.NameNode.Tolerations,
+					ImagePullSecrets: cluster.Spec.Image.PullSecrets,
+					Affinity:         cluster.Spec.HDFS.NameNode.Affinity,
+					Tolerations:      cluster.Spec.HDFS.NameNode.Tolerations,
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: int64Ptr(1000),
+					},
+					TerminationGracePeriodSeconds: int64Ptr(60),
 					InitContainers: []corev1.Container{
 						{
 							Name:            "init-namenode",
@@ -183,10 +191,9 @@ func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster
 							ImagePullPolicy: cluster.Spec.Image.PullPolicy,
 							SecurityContext: &corev1.SecurityContext{
 								RunAsUser: int64Ptr(0),
-								Privileged: boolPtr(true),
 							},
 							Command: []string{"/bin/bash", "-c"},
-							Args: []string{r.getNameNodeInitScript(cluster, isHA)},
+							Args:    []string{r.getNameNodeInitScript(cluster, isHA)},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "namenode-data",
@@ -217,8 +224,12 @@ func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster
 									Value: "/opt/hadoop/logs",
 								},
 								{
-									Name:  "HADOOP_HEAPSIZE",
-									Value: "1024",
+									Name: "POD_NAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "metadata.name",
+										},
+									},
 								},
 							},
 							Ports: []corev1.ContainerPort{
@@ -232,6 +243,13 @@ func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster
 								},
 							},
 							Resources: resources,
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/bash", "-c", "sleep 10"},
+									},
+								},
+							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -239,8 +257,10 @@ func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster
 										Port: intstr.FromString("web"),
 									},
 								},
-								InitialDelaySeconds: 100,
+								InitialDelaySeconds: 120,
 								PeriodSeconds:       30,
+								TimeoutSeconds:      10,
+								FailureThreshold:    5,
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
@@ -251,6 +271,8 @@ func (r *HadoopClusterReconciler) reconcileNameNode(ctx context.Context, cluster
 								},
 								InitialDelaySeconds: 40,
 								PeriodSeconds:       10,
+								TimeoutSeconds:      5,
+								FailureThreshold:    3,
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{

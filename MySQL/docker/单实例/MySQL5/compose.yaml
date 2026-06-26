@@ -1,25 +1,63 @@
-
 services:
   mysql5-single:
     image: mysql:5.7.44
     container_name: mysql5-single
-    restart: unless-stopped
-    ports:
-      - "3306:3306"
+    restart: always
     environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: root123456
-      MYSQL_ROOT_HOST: '%'
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    secrets:
+      - mysql_root_password
     volumes:
+      - ./my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./init-db:/docker-entrypoint-initdb.d:ro
       - mysql5-data:/var/lib/mysql
-      - ./my.cnf:/etc/mysql/conf.d/my.cnf
+    ports:
+      # 若需仅本机访问改为 "127.0.0.1:3306:3306"
+      - "0.0.0.0:3306:3306"
     healthcheck:
-      test: mysql -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD -e "SELECT 1"
-      interval: 10s
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$(cat /run/secrets/mysql_root_password)\" --silent 2>/dev/null || exit 1",
+        ]
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    deploy:
+      resources:
+        # 最大可用
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        # 最少保证可用
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    networks:
+      - mysql-net
 
+secrets:
+  mysql_root_password:
+    file: ./.root_password
+    
 volumes:
   mysql5-data:
     name: mysql5-data
+
+networks:
+  mysql-net:
+    name: mysql-net
+    driver: bridge

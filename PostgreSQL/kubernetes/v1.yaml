@@ -1,152 +1,106 @@
----
-# 配置专用namesapce
+# 创建专用secret
+# kubectl create secret generic pg-secret --from-literal=password='你的强密码' -n postgres
+
+# 1. 动态配置文件
 apiVersion: v1
-kind: Namespace
+kind: ConfigMap
 metadata:
-  name: bigdata5
+  name: pg-config
+data:
+  postgresql.conf: |
+    # 生产环境基础优化
+    max_connections = 100
+    shared_buffers = 512MB
+    effective_cache_size = 1.5GB
+    work_mem = 4MB
+    maintenance_work_mem = 64MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+
 ---
-# 1. 集群内访问：Headless Service
+
+# 2. 数据库服务 (Headless Service)
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgresql-headless
-  namespace: bigdata5
-  labels:
-    app: postgresql
+  name: postgres-internal
 spec:
+  ports:
+  - port: 5432
   selector:
-    app: postgresql
+    app: postgres
   clusterIP: None
-  ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
 ---
-# 2. 集群外访问：NodePort Service
+
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgresql-nodeport
-  namespace: bigdata5
-  labels:
-    app: postgresql
+  name: postgres-nodeport
 spec:
-  selector:
-    app: postgresql
   type: NodePort
+  selector:
+    app: postgres # 必须与 StatefulSet 中的 labels 匹配
   ports:
-    - name: postgresql
-      port: 5432
-      targetPort: 5432
-      #nodePort: 30432
-  sessionAffinity: ClientIP
+    - port: 5432         # Service 内部端口
+      targetPort: 5432   # 容器内部端口
+      # nodePort: 30432    # 外部访问端口 (范围必须在 30000-32767 之间)
+      protocol: TCP
 ---
-# 3. StatefulSet 部署
+
+# 3. 数据库主程序 (StatefulSet)
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: postgresql
-  namespace: bigdata5
+  name: postgres
 spec:
-  serviceName: postgresql-headless
+  serviceName: "postgres-internal"
   replicas: 1
   selector:
     matchLabels:
-      app: postgresql
+      app: postgres
   template:
     metadata:
       labels:
-        app: postgresql
+        app: postgres
     spec:
       containers:
-        - name: postgresql
-          image: postgres:18.1
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 5432
-              name: postgresql
-          env:
-            - name: POSTGRES_USER
-              value: "hive"
-            - name: POSTGRES_PASSWORD
-              value: "hive"
-            - name: POSTGRES_DB
-              value: "metastore_db"
-            - name: TZ
-              value: "Asia/Shanghai"
-            - name: POSTGRES_INITDB_ARGS
-              value: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
-            - name: POSTGRES_HOST_AUTH_METHOD
-              value: "md5"
-          resources:
-            requests:
-              cpu: "1"
-              memory: "2Gi"
-            limits:
-              cpu: "2"
-              memory: "4Gi"
-          startupProbe:
-            exec:
-              command: ["pg_isready", "-U", "hive", "-d", "metastore_db", "-h", "localhost"]
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          livenessProbe:
-            exec:
-              command: ["pg_isready", "-U", "hive", "-d", "metastore_db", "-h", "localhost"]
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            exec:
-              command: ["pg_isready", "-U", "hive", "-d", "metastore_db", "-h", "localhost"]
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          volumeMounts:
-            - name: postgresql-data
-              mountPath: /var/lib/postgresql
-            - name: localtime
-              mountPath: /etc/localtime
-              readOnly: true
-          args:
-            - "-c"
-            - "max_connections=1000"
-            - "-c"
-            - "shared_buffers=1GB"
-            - "-c"
-            - "work_mem=32MB"
-            - "-c"
-            - "maintenance_work_mem=256MB"
-            - "-c"
-            - "effective_cache_size=3GB"
-            - "-c"
-            - "checkpoint_completion_target=0.9"
-            - "-c"
-            - "wal_buffers=16MB"
-            - "-c"
-            - "default_statistics_target=100"
-            - "-c"
-            - "log_min_messages=warning"
-            - "-c"
-            - "log_rotation_size=100MB"
-            - "-c"
-            - "log_directory=/var/lib/postgresql/18/main/logs"
-            - "-c"
-            - "listen_addresses=*"
-      volumes:
-        - name: localtime
-          hostPath:
-            path: /etc/localtime
-            type: File
-  volumeClaimTemplates:
-    - metadata:
-        name: postgresql-data
-        namespace: bigdata5
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: "local"
+      - name: postgres
+        image: postgres:18.4
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: mydb
+        - name: POSTGRES_USER
+          value: admin
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pg-secret
+              key: password
         resources:
           requests:
-            storage: "10Gi"
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        volumeMounts:
+        - name: pg-data
+          mountPath: /var/lib/postgresql
+        - name: config-volume
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
+      volumes:
+      - name: config-volume
+        configMap:
+          name: pg-config
+  volumeClaimTemplates:
+  - metadata:
+      name: pg-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 20Gi

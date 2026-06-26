@@ -1,0 +1,81 @@
+services:
+  namesrv:
+    image: apache/rocketmq:5.5.0
+    container_name: rmqnamesrv
+    restart: unless-stopped
+    ports:
+      - 9876:9876
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f namesrv > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - rocketmq
+    command: sh mqnamesrv
+  broker:
+    image: apache/rocketmq:5.5.0
+    container_name: rmqbroker
+    restart: unless-stopped
+    ports:
+      - 10909:10909
+      - 10911:10911
+      - 10912:10912
+    environment:
+      - NAMESRV_ADDR=rmqnamesrv:9876
+    depends_on:
+      - namesrv
+    healthcheck:
+      test: ["CMD", "sh", "-c", "if [ -f /tmp/rocketmq/broker.pid ] && kill -0 `cat /tmp/rocketmq/broker.pid` 2>/dev/null; then echo 'ok'; else ps aux | grep java | grep broker | grep -v grep; fi"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    networks:
+      - rocketmq
+    command: sh mqbroker
+  proxy:
+    image: apache/rocketmq:5.5.0
+    container_name: rmqproxy
+    networks:
+      - rocketmq
+    depends_on:
+      - broker
+      - namesrv
+    ports:
+      - 8080:8080
+      - 8081:8081
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ps aux | grep java | grep proxy | grep -v grep || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    environment:
+      - NAMESRV_ADDR=rmqnamesrv:9876
+    command: sh mqproxy
+  rocketmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:2.1.0
+    container_name: rocketmq-dashboard
+    restart: unless-stopped
+    ports:
+      - 8082:8082
+    environment:
+      - JAVA_OPTS=-Drocketmq.namesrv.addr=rmqnamesrv:9876
+    depends_on:
+      - namesrv
+    networks:
+      - rocketmq
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  rocketmq:
+    name: rocketmq-net
+    driver: bridge

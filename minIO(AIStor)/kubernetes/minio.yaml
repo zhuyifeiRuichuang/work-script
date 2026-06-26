@@ -1,0 +1,124 @@
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local
+  resources:
+    requests:
+      storage: 50Gi
+---
+# Service - ClusterIP 类型（集群内部访问）
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-clusterip
+spec:
+  type: ClusterIP
+  selector:
+    app: minio-aistor
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# Service - NodePort 类型（节点外部访问）
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-nodeport
+spec:
+  type: NodePort
+  selector:
+    app: minio-aistor
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+      # nodePort: 30000  # 自定义 API 访问端口（30000-32767）
+    - name: console
+      port: 9001
+      targetPort: 9001
+      # nodePort: 30001  # 自定义控制台端口
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-aistor
+  labels:
+    app: minio-aistor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-aistor
+  template:
+    metadata:
+      labels:
+        app: minio-aistor
+    spec:
+      restartPolicy: Always
+      containers:
+      - name: minio-server
+        image: quay.io/minio/aistor/minio:latest
+        imagePullPolicy: IfNotPresent
+        
+        # 端口映射
+        ports:
+        - containerPort: 9000
+        - containerPort: 9001
+        
+        # 挂载卷（数据、证书、授权文件）
+        volumeMounts:
+        - name: minio-data
+          mountPath: /mnt/data
+        # - name: minio-certs
+        #   mountPath: /etc/minio/certs
+        - name: minio-license
+          mountPath: /minio.license
+          subPath: minio.license  # 关键：直接挂载文件
+        
+        # 启动命令（与原配置一致）
+        command:
+        - minio
+        - server
+        - /mnt/data
+        - --license
+        - /minio.license
+        
+        # 健康检查
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        # 资源限制（可选）
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+      
+      # 卷定义
+      volumes:
+      - name: minio-data
+        persistentVolumeClaim:
+          claimName: minio-data-pvc
+      # - name: minio-certs
+      #   persistentVolumeClaim:
+      #     claimName: minio-certs-pvc
+      - name: minio-license
+        secret:
+          secretName: minio-license  

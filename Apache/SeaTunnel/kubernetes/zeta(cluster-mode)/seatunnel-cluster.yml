@@ -49,7 +49,7 @@ spec:
     spec:
       containers:
         - name: seatunnel
-          image: seatunnel:2.3.13
+          image: apache/seatunnel:2.3.13
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5801
@@ -57,11 +57,11 @@ spec:
           command: ["/bin/sh","-c","/opt/seatunnel/bin/seatunnel-cluster.sh -DJvmOption=-Xms2G -Xmx2G"]
           resources:
             limits:
-              cpu: "1"
-              memory: 4G
+              cpu: "4"
+              memory: 8G
             requests:
-              cpu: "1"
-              memory: 2G
+              cpu: "2"
+              memory: 6G
           volumeMounts:
             - mountPath: "/opt/seatunnel/config/hazelcast.yaml"
               name: hazelcast
