@@ -38,6 +38,16 @@ spec:
     image: apache/doris:fe-4.1.1
     service:
       type: NodePort
+      servicePorts:
+      - targetPort: 8030
+        # nodePort: 31001
+      - targetPort: 9010
+        # nodePort: 31002
+      - targetPort: 9020
+        # nodePort: 31003
+      - targetPort: 9030
+        # nodePort: 31004
+        
   beSpec:
     replicas: 1
     limits:
@@ -49,3 +59,12 @@ spec:
     image: apache/doris:be-4.1.1
     service:
       type: NodePort
+      servicePorts:
+      - targetPort: 8040
+        # nodePort: 31005
+      - targetPort: 8060
+        # nodePort: 31006
+      - targetPort: 9050
+        # nodePort: 31007
+      - targetPort: 9060
+        # nodePort: 31008

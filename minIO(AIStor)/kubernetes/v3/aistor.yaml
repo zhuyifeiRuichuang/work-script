@@ -1,0 +1,203 @@
+---
+# ==============================================
+# 2. Secret: 管理员账号密码（替代明文环境变量）
+#    生成命令示例：
+#    echo -n "你的管理员账号" | base64
+#    echo -n "你的强密码" | base64
+#    注意：必须加 -n 避免换行符导致密码错误
+# ==============================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aistor-minio-credentials
+  namespace: aistor
+type: Opaque
+data:
+  # 替换为 base64 编码后的账号，默认示例为 minioadmin
+  root-user: "bWluaW9hZG1pbg=="
+  # 替换为 base64 编码后的密码，默认示例为 minioadmin
+  root-password: "bWluaW9hZG1pbg=="
+---
+# ==============================================
+# 2. ConfigMap: 存储证书目录内容（可选）
+#    若证书含私钥，建议合并到上方Secret中
+# ==============================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aistor-minio-certs
+  namespace: aistor
+data: {}
+  # 示例证书格式：
+  # public.crt: |
+  #   -----BEGIN CERTIFICATE-----
+  #   ...
+  #   -----END CERTIFICATE-----
+  # private.key: |
+  #   -----BEGIN PRIVATE KEY-----
+  #   ...
+  #   -----END PRIVATE KEY-----
+
+---
+# ==============================================
+# 3. Headless Service: StatefulSet 内部 DNS 发现
+#    用于 MinIO 分布式节点间互相通信
+# ==============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: aistor-minio-hl
+  namespace: aistor
+  labels:
+    app: aistor-minio
+spec:
+  clusterIP: None
+  selector:
+    app: aistor-minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+
+---
+# ==============================================
+# 4. NodePort Service: 对外暴露服务
+# ==============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: aistor-minio-nodeport
+  namespace: aistor
+  labels:
+    app: aistor-minio
+spec:
+  type: NodePort
+  selector:
+    app: aistor-minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+      # nodePort: 30000   # API 对外端口，范围 30000-32767
+    - name: console
+      port: 9001
+      targetPort: 9001
+      # nodePort: 30001   # 控制台对外端口，范围 30000-32767
+
+---
+# ==============================================
+# 5. StatefulSet: 免费版最高配置只能选单节点双驱动器
+# ==============================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: aistor-minio
+  namespace: aistor
+  labels:
+    app: aistor-minio
+spec:
+  serviceName: aistor-minio-hl
+  # 关键：免费license仅支持单节点，副本数固定为1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aistor-minio
+  template:
+    metadata:
+      labels:
+        app: aistor-minio
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: minio
+          image: quay.io/minio/aistor/minio:latest
+          # 单节点多驱动器模式：直接列出本地数据目录，不使用分布式http地址
+          command:
+            - minio
+            - server
+            - /mnt/data-0
+            - /mnt/data-1
+            - --console-address
+            - ":9001"
+            - --license
+            - /minio.license
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: aistor-minio-credentials
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aistor-minio-credentials
+                  key: root-password
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data-0
+              mountPath: /mnt/data-0
+            - name: data-1
+              mountPath: /mnt/data-1
+            - name: license
+              mountPath: /minio.license
+              subPath: minio.license
+            - name: certs
+              mountPath: /etc/minio/certs
+      volumes:
+        - name: license
+          secret:
+            secretName: aistor-minio-license
+            items:
+              - key: minio.license
+                path: minio.license
+        - name: certs
+          configMap:
+            name: aistor-minio-certs
+
+  # 双持久化卷：单节点下对应两块独立数据盘
+  volumeClaimTemplates:
+    - metadata:
+        name: data-0
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: "openebs-hostpath"
+        resources:
+          requests:
+            storage: 100Gi
+    - metadata:
+        name: data-1
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: "openebs-hostpath"
+        resources:
+          requests:
+            storage: 100Gi

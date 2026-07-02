@@ -18,7 +18,7 @@ mkdir -p /data/minio/data /data/minio/certs
 
 # 申请license
 
-浏览器访问`https://www.min.io/pricing`，根据业务需求申请许可证书，下载license文件。上传至`/data/minio`
+访问`https://www.min.io/pricing`，获取免费的license 文件`minio.license`，上传至`/data/minio`
 
 # 配置TLS(可选)
 

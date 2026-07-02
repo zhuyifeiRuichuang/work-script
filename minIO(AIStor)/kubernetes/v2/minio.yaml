@@ -1,0 +1,231 @@
+# minio/minio:RELEASE.2025-09-07T16-13-09Z 是最后一个开源版本。
+# minio/minio:RELEASE.2025-04-22T22-12-26Z 是最后一个带图形界面版本
+# minio代码：https://github.com/minio/minio
+# console代码：https://github.com/georgmangold/console  https://github.com/Alevsk/console
+
+# 命名空间
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+---
+# 账号密码 Secret（生产环境建议替换为强密码）
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+  namespace: minio
+type: Opaque
+data:
+  root-user: YWRtaW4=        # admin (base64编码)
+  root-password: YWRtaW5AMTIz # admin@123 (base64编码)
+
+---
+# MinIO 分布式集群 StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: minio
+spec:
+  serviceName: minio-headless
+  replicas: 3  # Pod 副本数量，可在此处修改
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+          command:
+            - minio
+            - server
+            # 节点地址范围：{0...2} 对应 3 个副本，修改副本数需同步调整
+            # 磁盘范围：{1...2} 表示每个 Pod 挂载 2 块盘
+            - http://minio-{0...2}.minio-headless.minio.svc.cluster.local/data{1...2}
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: root-password
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: minio-data-1
+              mountPath: /data1
+            - name: minio-data-2
+              mountPath: /data2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+  # 每个 Pod 独立分配 2 块持久化存储
+  volumeClaimTemplates:
+    - metadata:
+        name: minio-data-1
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: "your-storage-class"  # 指定集群存储类，按需取消注释
+        resources:
+          requests:
+            storage: 10Gi  # 单盘容量，按需调整
+    - metadata:
+        name: minio-data-2
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: "your-storage-class"
+        resources:
+          requests:
+            storage: 10Gi
+---
+# 第三方 MinIO Console 部署
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-console
+  namespace: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-console
+  template:
+    metadata:
+      labels:
+        app: minio-console
+    spec:
+      containers:
+        - name: minio-console
+          image: zhuyifeiruichuang/georgmangold-console:dev1
+          env:
+            - name: CONSOLE_MINIO_SERVER
+              value: "http://minio-service.minio.svc.cluster.local:9000"
+          ports:
+            - containerPort: 9090
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+# 第三方 Console 访问 Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-console-service
+  namespace: minio
+spec:
+  selector:
+    app: minio-console
+  ports:
+    - port: 9090
+      targetPort: 9090
+      name: http
+  type: ClusterIP
+---
+# MinIO 主服务 NodePort（对外暴露 API + 官方控制台）
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-nodeport
+  namespace: minio
+spec:
+  type: NodePort
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+      nodePort: 30000  # 对外 S3 API 端口，范围需在 30000-32767 之间
+    - name: console-official
+      port: 9001
+      targetPort: 9001
+      # nodePort: 30001  # 对外官方 Web 控制台端口
+---
+# 第三方 MinIO Console NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-console-nodeport
+  namespace: minio
+spec:
+  type: NodePort
+  selector:
+    app: minio-console
+  ports:
+    - port: 9090
+      targetPort: 9090
+      # nodePort: 30090  # 对外第三方控制台端口
+      name: http
+---
+# Headless Service（StatefulSet 必需，提供稳定 DNS 解析）
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: minio
+spec:
+  clusterIP: None
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# MinIO 集群访问 Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console-official
+      port: 9001
+      targetPort: 9001
+  type: ClusterIP

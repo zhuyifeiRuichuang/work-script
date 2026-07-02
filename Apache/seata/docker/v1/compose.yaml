@@ -1,0 +1,38 @@
+services:
+  # Seata 事务协调器服务
+  seata-server:
+    image: apache/seata-server:2.7.0
+    container_name: seata-server
+    ports:
+      - "7091:7091"
+      - "8091:8091"
+    environment:
+      - STORE_MODE=db
+      - SEATA_IP=172.16.0.30
+      - SEATA_PORT=8091
+    volumes:
+      - "/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime"
+      - "/usr/share/zoneinfo/Asia/Shanghai:/etc/timezone"
+      - ./config/seata-server/application.yml:/seata-server/resources/application.yml
+    networks:
+      - seata-network
+    restart: always
+
+  # Seata 控制台服务（Namingserver）
+  seata-namingserver:
+    image: apache/seata-naming-server:2.7.0.jdk25
+    container_name: seata-naming-server
+    hostname: seata-namingserver
+    ports:
+      - "8081:8081"
+      - "10055:10055"
+    volumes:
+      - ./config/seata-naming-server/application.yml:/seata-naming-server/resources/application.yml
+    networks:
+      - seata-network
+    restart: always
+
+networks:
+  seata-network:
+    name: seata-net
+    external: true
