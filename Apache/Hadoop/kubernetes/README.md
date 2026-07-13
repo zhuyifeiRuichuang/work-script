@@ -3,15 +3,13 @@
 
 参考`https://github.com/stackabletech/hdfs-operator`
 
-
-
 operator处于开发阶段，不可在生产环境使用。
 
 
 
 ## 容器镜像
 推荐采用Hadoop官方镜像。
-案例采用定制的Hadoop v3.1.1  
+案例采用定制的Hadoop v3.1.1 
 可参考[资料](https://github.com/zhuyifeiRuichuang/work-script/tree/main/hadoop/docker.build)打包定制容器镜像。
 
 ## 配置文件
@@ -38,6 +36,50 @@ Hadoop可能需要一个类似apache Doris的 operator实现集群的部署管�
 # 修改配置文件
 推荐使用namespace名称hadoop。除了超大规模环境，很少有一个k8s集群部署多套Hadoop的业务场景，除非基础资源超级多。
 若需指定其他`namespace`部署Hadoop，需修改`configmap.yaml`中所有关于`namespace`的配置，例如`namenode-0.namenode.hadoop:9000`,`resourcemanager-0.resourcemanager.hadoop`，其中`hadoop`是namespace。需修改`datanode.yaml`中`namenode-0.namenode.hadoop`,其中`hadoop`是namespace。
+
+
+
+多个datanode场景。若需要多个datanode实现数据多副本，应做以下配置
+
+修改`configmap.yaml`的`hdfs-site.xml`部分，
+
+```bash
+<property>
+        <name>dfs.replication</name>
+        # 将副本数调整为3
+        <value>3</value>
+</property>
+```
+
+修改`datanode.yaml`的`StatefulSet`部分
+
+```bash
+spec:
+  serviceName: datanode
+  # 改为3副本
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+    spec:
+    # 添加反亲和性，让三个datanode落在不同的node
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - hadoop-datanode
+            topologyKey: "kubernetes.io/hostname"
+```
+
+
 
 # 部署
 务必按照顺序部署。指定部署在namespace hadoop中。

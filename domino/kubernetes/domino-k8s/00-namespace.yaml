@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: domino
-  labels:
-    app.kubernetes.io/name: domino
-    app.kubernetes.io/part-of: domino

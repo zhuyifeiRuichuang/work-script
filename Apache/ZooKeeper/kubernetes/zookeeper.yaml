@@ -1,0 +1,238 @@
+# ========== ZooKeeper 3节点集群 ==========
+# 用于 HDFS NameNode HA 自动故障转移（ZKFC）。若用于其他环境，应当修改启动命令中的hadoop字段为真实namespace
+# 使用官方 zookeeper:3.9.5 镜像
+# 3.9.x 变化：基于 JDK 17+，配置项 ZOO_4LINEAR_ENABLE 已移除（默认启用）
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  labels:
+    app: zookeeper
+spec:
+  clusterIP: None   # Headless Service，用于 Pod DNS 发现
+  publishNotReadyAddresses: true   # 让等待方能在 Pod 未 Ready 时也解析到 IP
+  ports:
+    - port: 2181
+      name: client
+    - port: 2888
+      name: peer
+    - port: 3888
+      name: election
+  selector:
+    app: zookeeper
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper-external
+  labels:
+    app: zookeeper
+spec:
+  type: NodePort
+  ports:
+    - port: 2181
+      name: client
+      targetPort: 2181
+      # nodePort 留空，系统自动分配
+  selector:
+    app: zookeeper
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zookeeper-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: zookeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 3
+  # OrderedReady（默认）：Pod 按序启动，确保前一个就绪后才启动下一个
+  # 必须用 OrderedReady 而非 Parallel：Parallel 会导致 3 个 Pod 同时启动，
+  # 此时 Headless Service DNS 尚未完全传播，ZK 节点找不到 Peer 无法形成
+  # Quorum，进程崩溃退出 (exit code 14)，产生多次无效重启。
+  # OrderedReady 保证 zookeeper-1 启动时 zookeeper-0 的 DNS 已就绪。
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      subdomain: zookeeper
+      priorityClassName: hadoop-namenode-high
+
+      # ZK 节点分散到不同 Node（保证仲裁安全）
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: zookeeper
+              topologyKey: kubernetes.io/hostname
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+      - name: zookeeper
+        # ZK 3.9.5 官方镜像（华为云镜像源）
+        # 重要：3.9.5 Docker entrypoint 在使用 ZOO_SERVERS 时不写 clientPort 到 zoo.cfg，
+        # 导致 plain 客户端端口被禁用 (plain=disabled)，端口 2181 不监听。
+        # 解决方案：覆盖 command，手动写完整 zoo.cfg（含 clientPort=2181），然后前台启动 ZK。
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/zookeeper:3.9.5
+        imagePullPolicy: IfNotPresent
+
+        command:
+          - /bin/bash
+          - -ec
+          - |
+            # ===== 阶段1：准备环境 =====
+            set -e
+            mkdir -p /data /datalog /conf /logs
+
+            # 写入完整的 zoo.cfg（显式包含 clientPort=2181）
+            cat > /conf/zoo.cfg << 'ZKCFG'
+            tickTime=2000
+            dataDir=/data
+            dataLogDir=/datalog
+            clientPort=2181
+            initLimit=10
+            syncLimit=2
+            autopurge.snapRetainCount=3
+            autopurge.purgeInterval=1
+            server.1=zookeeper-0.zookeeper.hadoop:2888:3888
+            server.2=zookeeper-1.zookeeper.hadoop:2888:3888
+            server.3=zookeeper-2.zookeeper.hadoop:2888:3888
+            ZKCFG
+
+            echo "=== /conf/zoo.cfg ==="
+            cat /conf/zoo.cfg
+            echo "=== /data/myid ==="
+            cat /data/myid
+
+            # JDK 17 反射权限（Hadoop ZKFC 依赖）
+            export SERVER_JVMFLAGS="--add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED"
+
+            # ===== 阶段2：SIGTERM 陷阱（转发给 ZK 进程，确保优雅关闭） =====
+            ZK_PID=""
+            _term() {
+              echo "$(date): Received SIGTERM, stopping ZooKeeper..."
+              if [ -n "$ZK_PID" ] && kill -0 "$ZK_PID" 2>/dev/null; then
+                kill -TERM "$ZK_PID"
+                wait "$ZK_PID" 2>/dev/null
+              fi
+              exit 0
+            }
+            trap _term TERM INT
+
+            # ===== 阶段3：启动 ZK（带重试，吸收 Quorum 组建期间的偶发崩溃） =====
+            # OrderedReady 保证前置 Pod 已就绪，但 ZK 处于 LOOKING 状态时
+            # readiness probe 已通过，新 Pod 加入 Quorum 仍可能有瞬态时序竞争，
+            # 导致 ZK 偶发退出 (exit code 14)。通过进程内重试吸收，避免 Pod 级重启。
+            set +e
+            MAX_RETRY=3
+            RETRY=0
+            while [ $RETRY -lt $MAX_RETRY ]; do
+              echo "$(date): Starting ZooKeeper (attempt $((RETRY+1))/$MAX_RETRY)..."
+              zkServer.sh start-foreground &
+              ZK_PID=$!
+              wait $ZK_PID
+              EXIT=$?
+              ZK_PID=""
+
+              echo "$(date): ZooKeeper exited with code $EXIT"
+              if [ $EXIT -eq 0 ]; then
+                echo "$(date): ZooKeeper exited normally"
+                exit 0
+              fi
+
+              RETRY=$((RETRY+1))
+              if [ $RETRY -lt $MAX_RETRY ]; then
+                echo "$(date): Will retry in 5 seconds..."
+                sleep 5
+              fi
+            done
+
+            echo "$(date): Max retries ($MAX_RETRY) exhausted, giving up"
+            exit $EXIT
+
+        ports:
+          - containerPort: 2181
+            name: client
+          - containerPort: 2888
+            name: peer
+          - containerPort: 3888
+            name: election
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        # startupProbe：ZK 3.9.5 + JDK 17 启动较慢，需要充足启动时间
+        # startupProbe 通过后，liveness/readiness 才开始工作
+        startupProbe:
+          tcpSocket:
+            port: 2181
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 30   # 10 + 10×30 = 310s 最大启动容忍
+        livenessProbe:
+          tcpSocket:
+            port: 2181
+          periodSeconds: 15
+          timeoutSeconds: 3
+          failureThreshold: 5     # 75s 容忍（startup 通过后 ZK 已稳定）
+        readinessProbe:
+          tcpSocket:
+            port: 2181
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+          - name: zookeeper-data
+            mountPath: /data
+
+      # initContainer：从 Pod 名提取序号写入 /data/myid
+      # zoo.cfg 由主容器的 command 直接写入 /conf/zoo.cfg（绕过有 bug 的 Docker entrypoint）
+      initContainers:
+      - name: fix-myid
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/zookeeper:3.9.5
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            # 从 Pod 名提取序号：zookeeper-0 → 1，zookeeper-1 → 2，zookeeper-2 → 3
+            POD_NAME=$(hostname)
+            ORD=${POD_NAME##*-}
+            MY_ID=$((ORD + 1))
+            echo "Pod: $POD_NAME -> ZOO_MY_ID=$MY_ID"
+            echo $MY_ID > /data/myid
+            echo "Written myid=$MY_ID to /data/myid"
+            cat /data/myid
+        volumeMounts:
+          - name: zookeeper-data
+            mountPath: /data
+
+  volumeClaimTemplates:
+  - metadata:
+      name: zookeeper-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      # 不指定 storageClassName，自动使用集群默认 StorageClass
+      resources:
+        requests:
+          storage: 10Gi

@@ -34,6 +34,8 @@ spec:
         ports:
         - containerPort: 3306
         env:
+        - name: TZ
+          value: "Asia/Shanghai"
         - name: MYSQL_ROOT_PASSWORD
           value: "root123456"
         args:

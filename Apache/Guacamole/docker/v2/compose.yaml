@@ -1,0 +1,105 @@
+networks:
+  guacamole:
+    driver: bridge
+    name: guacamole-net
+
+volumes:
+  postgresql-data:
+    name: pg-data-guacamole
+
+services:
+  # 组件1：Guacd 服务
+  guacd:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/guacamole/guacd:1.6.0
+    container_name: guacd
+    hostname: guacd
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    # ports:
+      # - "4822:4822"
+    networks:
+      - guacamole
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 组件2：Guacamole Web 服务（改用 PostgreSQL）
+  guacamole:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/guacamole/guacamole:1.6.0
+    container_name: guacamole
+    hostname: guacamole
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      guacd:
+        condition: service_started
+    environment:
+      TZ: Asia/Shanghai
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: 4822
+      # ===== PostgreSQL 连接配置 =====
+      POSTGRESQL_ENABLED: "true"
+      POSTGRESQL_HOSTNAME: postgresql
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole_user
+      POSTGRESQL_PASSWORD: guacamole_dbpass#1A
+      # 指定URL后缀为根目录。可指定为aaa，使访问变为IP:8080/aaa 。若注释掉，需访问IP:8080/guacamole
+      WEBAPP_CONTEXT: ROOT
+    networks:
+      - guacamole
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  # PostgreSQL 数据库（Guacamole 专用）
+  postgresql:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/postgres:18.4
+    container_name: pg-guacamole
+    restart: always
+    networks:
+      - guacamole
+    # ports:
+    #   - "5432:5432"
+    environment:
+      - TZ=Asia/Shanghai
+      - POSTGRES_USER=guacamole_user
+      - POSTGRES_PASSWORD=guacamole_dbpass#1A
+      - POSTGRES_DB=guacamole_db
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --lc-collate=C --lc-ctype=C
+      - POSTGRES_HOST_AUTH_METHOD=md5
+    volumes:
+      - postgresql-data:/var/lib/postgresql/
+      # 初始化脚本：导入 guacamole 表结构（首次初始化时执行）
+      - ./initdb.sql:/docker-entrypoint-initdb.d/initdb.sql
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guacamole_user -d guacamole_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: >
+      -c max_connections=1000
+      -c shared_buffers=1GB
+      -c work_mem=32MB
+      -c maintenance_work_mem=256MB
+      -c effective_cache_size=3GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c listen_addresses='*'

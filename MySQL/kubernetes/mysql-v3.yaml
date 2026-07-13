@@ -108,6 +108,8 @@ spec:
       - name: mysql
         image: mysql:9.5.0
         env:
+        - name: TZ
+          value: "Asia/Shanghai"
         - name: MYSQL_ROOT_PASSWORD
           value: "Pass123!"
         ports:

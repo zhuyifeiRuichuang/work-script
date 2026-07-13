@@ -3,7 +3,7 @@
 ---
 x-airflow-common:
   &airflow-common
-  image: apache/airflow:2.7.2-python3.9
+  image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/airflow:2.7.2-python3.9
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
@@ -33,7 +33,7 @@ x-airflow-common:
 services:
   postgres:
     # postgres:13
-    image: postgres:13
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/postgres:13
     container_name: airflow-postgres
     environment:
       POSTGRES_USER: airflow
@@ -52,7 +52,7 @@ services:
 
   redis:
     # redis:latest
-    image: redis:latest
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/redis:8.8.0
     container_name: airflow-redis
     expose:
       - 6379
@@ -267,7 +267,7 @@ services:
   # Modified Airflow Worker with Domino
   airflow-worker:
     <<: *airflow-common
-    image: ghcr.io/tauffer-consulting/domino-airflow-base:latest
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/tauffer-consulting/domino-airflow-base:latest
     container_name: airflow-worker
     command: celery worker
     healthcheck:
@@ -298,8 +298,9 @@ services:
 
   # Domino REST Api
   domino_rest:
-    image: ghcr.io/tauffer-consulting/domino-rest:latest
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/tauffer-consulting/domino-rest:latest
     container_name: domino-rest
+    restart: always
     command: bash -c "alembic upgrade heads && python -m utils.populate_first_user && uvicorn main:app --reload --workers 1 --host 0.0.0.0 --port 8000"
     ports:
       - 8000:8000
@@ -324,7 +325,7 @@ services:
 
   # Domino Postgres
   domino_postgres:
-    image: postgres:13
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/postgres:13
     container_name: domino-postgres
     environment:
       - POSTGRES_DB=postgres
@@ -350,7 +351,8 @@ services:
 
   # Domino Frontend
   domino_frontend:
-    image: ghcr.io/tauffer-consulting/domino-frontend:compose
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/tauffer-consulting/domino-frontend:compose
+    restart: always
     container_name: domino-frontend
     ports:
       - "3000:80"
@@ -365,8 +367,9 @@ services:
       - domino-net
 
   docker-proxy:
-    image: alpine/socat
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/alpine/socat:1.8.1.3
     container_name: domino-docker-proxy
+    restart: always
     command: "TCP4-LISTEN:2375,fork,reuseaddr UNIX-CONNECT:/var/run/docker.sock"
     ports:
       - "2376:2375"

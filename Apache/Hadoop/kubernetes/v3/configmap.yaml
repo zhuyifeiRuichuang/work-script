@@ -76,10 +76,6 @@ data:
         <value>1</value>
       </property>
       <property>
-        <name>dfs.client.use.datanode.hostname</name>
-        <value>true</value>
-      </property>
-      <property>
         <name>dfs.permissions.enabled</name>
         <value>false</value>
       </property>
