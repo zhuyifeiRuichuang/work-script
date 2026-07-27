@@ -1,0 +1,628 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hadoop-config
+data:
+  core-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <!-- ==================== HA 逻辑文件系统（核心变更） ==================== -->
+      <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://mycluster</value>
+        <description>HDFS 逻辑 URI，客户端通过此名称自动 failover 到 Active NameNode。mycluster 为 nameservice ID，与 hdfs-site.xml 中 dfs.nameservices 对应</description>
+      </property>
+
+      <!-- ==================== ZooKeeper 仲裁地址（HA 自动故障切换依赖） ==================== -->
+      <property>
+        <name>ha.zookeeper.quorum</name>
+        <value>zookeeper-0.zookeeper.hadoop.svc.cluster.local:2181,zookeeper-1.zookeeper.hadoop.svc.cluster.local:2181,zookeeper-2.zookeeper.hadoop.svc.cluster.local:2181</value>
+        <description>ZooKeeper 3 节点仲裁地址，ZKFC 通过 ZK 进行 leader 选举和自动故障切换</description>
+      </property>
+
+      <!-- ==================== 基础配置 ==================== -->
+      <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/opt/hadoop/tmpdata</value>
+      </property>
+
+      <!-- ==================== I/O 与缓冲配置 ==================== -->
+      <property>
+        <name>io.file.buffer.size</name>
+        <value>131072</value>
+        <description>序列文件 I/O 缓冲区大小（128KB），生产环境推荐值</description>
+      </property>
+
+      <!-- ==================== 代理用户配置 ==================== -->
+      <property>
+        <name>hadoop.proxyuser.hadoop.hosts</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hadoop.groups</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hue.hosts</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hue.groups</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hive.hosts</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hive.groups</name>
+        <value>*</value>
+      </property>
+
+      <!-- ==================== 安全与压缩配置 ==================== -->
+      <property>
+        <name>io.compression.codecs</name>
+        <value>org.apache.hadoop.io.compress.GzipCodec,org.apache.hadoop.io.compress.DefaultCodec,org.apache.hadoop.io.compress.SnappyCodec,org.apache.hadoop.io.compress.BZip2Codec</value>
+        <description>启用常用压缩编解码器，减少存储与网络开销</description>
+      </property>
+    </configuration>
+
+  hdfs-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+
+      <!-- ============================================================ -->
+      <!-- =           NameNode HA 核心配置（新增）                     = -->
+      <!-- ============================================================ -->
+
+      <!-- nameservice ID，与 core-site.xml 中 fs.defaultFS 的 hdfs://mycluster 对应 -->
+      <property>
+        <name>dfs.nameservices</name>
+        <value>mycluster</value>
+        <description>HDFS 命名服务 ID，HA 集群的逻辑名称</description>
+      </property>
+
+      <!-- HA 下的 NameNode 标识符列表 -->
+      <property>
+        <name>dfs.ha.namenodes.mycluster</name>
+        <value>nn1,nn2</value>
+        <description>mycluster 下两个 NameNode 的逻辑名称：nn1=Active, nn2=Standby</description>
+      </property>
+
+      <!-- 每个 NameNode 的 RPC 地址 -->
+      <property>
+        <name>dfs.namenode.rpc-address.mycluster.nn1</name>
+        <value>namenode-0.namenode.hadoop.svc.cluster.local:9000</value>
+        <description>nn1 (namenode-0) 的 RPC 地址，客户端和 DN 通过此地址通信</description>
+      </property>
+      <property>
+        <name>dfs.namenode.rpc-address.mycluster.nn2</name>
+        <value>namenode-1.namenode.hadoop.svc.cluster.local:9000</value>
+        <description>nn2 (namenode-1) 的 RPC 地址，客户端和 DN 通过此地址通信</description>
+      </property>
+
+      <!-- 每个 NameNode 的 HTTP WebUI 地址 -->
+      <property>
+        <name>dfs.namenode.http-address.mycluster.nn1</name>
+        <value>namenode-0.namenode.hadoop.svc.cluster.local:9870</value>
+      </property>
+      <property>
+        <name>dfs.namenode.http-address.mycluster.nn2</name>
+        <value>namenode-1.namenode.hadoop.svc.cluster.local:9870</value>
+      </property>
+
+      <!-- 共享编辑日志目录（JournalNode 仲裁）— HA 元数据一致性的核心 -->
+      <property>
+        <name>dfs.namenode.shared.edits.dir</name>
+        <value>qjournal://journalnode-0.journalnode.hadoop.svc.cluster.local:8485;journalnode-1.journalnode.hadoop.svc.cluster.local:8485;journalnode-2.journalnode.hadoop.svc.cluster.local:8485/mycluster</value>
+        <description>JournalNode 3 节点仲裁 URI。Active NN 写入编辑日志到此，Standby NN 从此读取同步。任一 JN 故障不影响仲裁（2/3 多数即可）</description>
+      </property>
+
+      <!-- 客户端 Failover 代理 — 客户端通过逻辑 URI 自动切换到 Active NN -->
+      <property>
+        <name>dfs.client.failover.proxy.provider.mycluster</name>
+        <value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>
+        <description>客户端 failover 代理类，当 Active NN 不可用时自动切换到 Standby NN</description>
+      </property>
+
+      <!-- 故障切换隔离方法 -->
+      <property>
+        <name>dfs.ha.fencing.methods</name>
+        <value>shell(/bin/true)</value>
+        <description>K8s 环境下使用 shell(/bin/true) 作为隔离方法。Pod 级别隔离由 K8s 保证，ZKFC + ZooKeeper 确保 Active 唯一性。无需 SSH 隔离</description>
+      </property>
+
+      <!-- 启用自动故障切换 -->
+      <property>
+        <name>dfs.ha.automatic-failover.enabled</name>
+        <value>true</value>
+        <description>启用基于 ZooKeeper 的自动故障切换。ZKFC 监控 NN 健康，Active 故障时自动切换到 Standby</description>
+      </property>
+
+      <!-- JournalNode 编辑日志存储目录 -->
+      <property>
+        <name>dfs.journalnode.edits.dir</name>
+        <value>/opt/hadoop/data/jn</value>
+        <description>JournalNode 存储共享编辑日志的本地目录</description>
+      </property>
+
+      <!-- HA Failover 相关调优 -->
+      <property>
+        <name>dfs.ha.tail-edits.in-progress</name>
+        <value>true</value>
+        <description>允许 Standby NN 实时 tail Active NN 的编辑日志，减少同步延迟</description>
+      </property>
+      <property>
+        <name>dfs.ha.log-roll.period</name>
+        <value>120</value>
+        <description>Active NN 每 120 秒滚动一次编辑日志，触发 Standby NN 检查点</description>
+      </property>
+      <property>
+        <name>dfs.ha.tail-edits.period</name>
+        <value>60</value>
+        <description>Standby NN 每 60 秒检查并拉取新的编辑日志</description>
+      </property>
+      <property>
+        <name>dfs.ha.tail-edits.namenode-addresses</name>
+        <value>mycluster</value>
+      </property>
+      <property>
+        <name>dfs.ha.zkfc.port</name>
+        <value>8019</value>
+        <description>ZKFC 健康检查 RPC 端口</description>
+      </property>
+
+      <!-- ============================================================ -->
+      <!-- =           副本与块配置（生产级）                           = -->
+      <!-- ============================================================ -->
+      <property>
+        <name>dfs.replication</name>
+        <value>3</value>
+        <description>数据块副本数设为 3，满足生产环境数据可靠性要求</description>
+      </property>
+      <property>
+        <name>dfs.blocksize</name>
+        <value>134217728</value>
+        <description>HDFS 块大小 128MB，生产环境平衡存储效率与 MapReduce 性能</description>
+      </property>
+
+      <!-- ============================================================ -->
+      <!-- =           NameNode 本地存储（HA 下每个 NN 独立本地存储）   = -->
+      <!-- ============================================================ -->
+      <property>
+        <name>dfs.namenode.name.dir</name>
+        <value>file:///opt/hadoop/data/nn1,file:///opt/hadoop/data/nn2</value>
+        <description>NameNode 元数据存储到两个独立目录，实现本地多副本冗余。HA 下每个 NN Pod 拥有独立的 PVC，nn1/nn2 提供磁盘级冗余</description>
+      </property>
+      <!-- 注意：HA 模式下不设置 dfs.namenode.edits.dir，编辑日志由 JournalNode 仲裁管理 -->
+
+      <!-- ==================== DataNode 数据目录 ==================== -->
+      <property>
+        <name>dfs.datanode.data.dir</name>
+        <value>/opt/hadoop/data/dn</value>
+      </property>
+
+      <!-- ==================== NameNode 网络绑定 ==================== -->
+      <property>
+        <name>dfs.namenode.rpc-bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>dfs.namenode.http-bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+
+      <!-- ==================== 心跳与超时配置（生产级） ==================== -->
+      <property>
+        <name>dfs.heartbeat.interval</name>
+        <value>3</value>
+        <description>DataNode 向 NameNode 心跳间隔（秒），生产环境 3s 保证快速故障感知</description>
+      </property>
+      <property>
+        <name>dfs.namenode.heartbeat.recheck-interval</name>
+        <value>30000</value>
+        <description>NameNode 重新检查心跳间隔（毫秒），配合 heartbeat.interval 决定 DataNode 失效判定时间</description>
+      </property>
+      <property>
+        <name>dfs.namenode.stale.datanode.interval</name>
+        <value>30000</value>
+        <description>标记 stale DataNode 的间隔（毫秒）</description>
+      </property>
+
+      <!-- ==================== 安全模式与恢复配置 ==================== -->
+      <property>
+        <name>dfs.namenode.safemode.threshold-pct</name>
+        <value>0.999f</value>
+        <description>安全模式退出阈值：99.9% 的块达到最小副本数才退出安全模式</description>
+      </property>
+      <property>
+        <name>dfs.namenode.safemode.min.datanodes</name>
+        <value>3</value>
+        <description>安全模式退出最少需要 3 个活跃 DataNode</description>
+      </property>
+      <property>
+        <name>dfs.namenode.safemode.extension</name>
+        <value>30000</value>
+        <description>安全模式自动退出后额外等待 30 秒，防止误判</description>
+      </property>
+
+      <!-- ==================== 副本放置与恢复策略 ==================== -->
+      <property>
+        <name>dfs.namenode.replication.min</name>
+        <value>1</value>
+        <description>写入时最少写入成功副本数，设为 1 允许降级写入</description>
+      </property>
+      <property>
+        <name>dfs.namenode.replication.pending.timeout.sec</name>
+        <value>300</value>
+        <description>副本复制超时时间（秒），超时后 NameNode 重新分配复制任务</description>
+      </property>
+      <property>
+        <name>dfs.namenode.replication.max-streams</name>
+        <value>4</value>
+        <description>NameNode 同时复制流上限，避免复制风暴</description>
+      </property>
+
+      <!-- ==================== 权限与安全配置 ==================== -->
+      <property>
+        <name>dfs.permissions.enabled</name>
+        <value>true</value>
+        <description>生产环境启用 HDFS 权限控制</description>
+      </property>
+      <property>
+        <name>dfs.permissions.superusergroup</name>
+        <value>hadoop</value>
+        <description>超级用户组为 hadoop，拥有 HDFS 全权限</description>
+      </property>
+      <property>
+        <name>dfs.namenode.acls.enabled</name>
+        <value>true</value>
+        <description>启用 ACL 支持细粒度权限控制</description>
+      </property>
+
+      <!-- ==================== WebHDFS 与监控 ==================== -->
+      <property>
+        <name>dfs.webhdfs.enabled</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
+        <value>false</value>
+        <description>K8s 环境下 DataNode IP 不固定，关闭反向解析检查</description>
+      </property>
+
+      <!-- ==================== 数据块与存储管理 ==================== -->
+      <property>
+        <name>dfs.datanode.du.reserved</name>
+        <value>10737418240</value>
+        <description>每个 DataNode 预留 10GB 空间，防止磁盘写满导致数据丢失</description>
+      </property>
+      <property>
+        <name>dfs.datanode.failed.volumes.tolerated</name>
+        <value>0</value>
+        <description>允许的故障磁盘数为 0，任一磁盘故障则 DataNode 下线</description>
+      </property>
+      <property>
+        <name>dfs.client.block-retry.max-time-ms</name>
+        <value>900000</value>
+        <description>客户端块重试最大时间 15 分钟</description>
+      </property>
+    </configuration>
+
+  yarn-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <!-- ==================== ResourceManager HA 配置（Active/Standby 自动故障切换） ==================== -->
+      <property>
+        <name>yarn.resourcemanager.ha.enabled</name>
+        <value>true</value>
+        <description>启用 RM HA，基于 ZooKeeper ActiveStandbyElector 自动选主</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.ha.rm-ids</name>
+        <value>rm1,rm2</value>
+        <description>两个 RM 逻辑 ID：rm1=resourcemanager-0, rm2=resourcemanager-1</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.cluster-id</name>
+        <value>yarn-ha</value>
+        <description>YARN HA 集群唯一 ID，作为 ZK 选主/状态存储的命名空间</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.hostname.rm1</name>
+        <value>resourcemanager-0.resourcemanager.hadoop.svc.cluster.local</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.hostname.rm2</name>
+        <value>resourcemanager-1.resourcemanager.hadoop.svc.cluster.local</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.zk-address</name>
+        <value>zookeeper-0.zookeeper.hadoop.svc.cluster.local:2181,zookeeper-1.zookeeper.hadoop.svc.cluster.local:2181,zookeeper-2.zookeeper.hadoop.svc.cluster.local:2181</value>
+        <description>ZK 仲裁地址（FQDN），与 HDFS ZKFC 共用同一 ZK 集群</description>
+      </property>
+      <property>
+        <name>yarn.client.failover-proxy-provider</name>
+        <value>org.apache.hadoop.yarn.client.ConfiguredRMFailoverProxyProvider</value>
+        <description>客户端自动 failover 代理，NM/AM/提交端经 ZK 发现 Active RM</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.webapp.address</name>
+        <value>resourcemanager-0.resourcemanager.hadoop.svc.cluster.local:8088,resourcemanager-1.resourcemanager.hadoop.svc.cluster.local:8088</value>
+        <description>AM Web 代理过滤器（AmFilterInitializer）在 HA 下读取此单地址作为 proxy hosts；设为两 RM 的 Web 地址（逗号分隔），避免 getProxyHostsAndPortsForAmFilter 返回 null 导致 AM Web 服务初始化 NPE（MRClientService.getHttpPort）。HA 下 RM 自身 Web 绑定走 per-RM-id 地址，不受此 base 值影响</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.webapp.address.rm1</name>
+        <value>resourcemanager-0.resourcemanager.hadoop.svc.cluster.local:8088</value>
+        <description>RM1(rm1=resourcemanager-0) Web UI 地址；HA 下 AmFilter 的 per-RM-id 读取路径（getUrlByRmId 读 yarn.resourcemanager.webapp.address.rm1）</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.webapp.address.rm2</name>
+        <value>resourcemanager-1.resourcemanager.hadoop.svc.cluster.local:8088</value>
+        <description>RM2(rm2=resourcemanager-1) Web UI 地址；HA 下 AmFilter 的 per-RM-id 读取路径</description>
+      </property>
+
+      <!-- ==================== ResourceManager 恢复配置（ZKRMStateStore） ==================== -->
+      <property>
+        <name>yarn.resourcemanager.recovery.enabled</name>
+        <value>true</value>
+        <description>启用 RM 状态恢复，RM 重启后自动恢复运行中的应用</description>
+      </property>
+      <property>
+        <name>yarn.resourcemanager.store.class</name>
+        <value>org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore</value>
+        <description>RM 状态（app/attempt/令牌）存 ZooKeeper，与选主同源=单一真相，failover 秒级、运行中作业不中断</description>
+      </property>
+
+      <!-- ==================== NodeManager 配置 ==================== -->
+      <property>
+        <name>yarn.nodemanager.bind-host</name>
+        <value>0.0.0.0</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.pmem-check-enabled</name>
+        <value>false</value>
+        <description>关闭物理内存检查，容器化环境由 K8s 管理内存</description>
+      </property>
+      <property>
+        <name>yarn.nodemanager.vmem-check-enabled</name>
+        <value>false</value>
+        <description>关闭虚拟内存检查，容器化环境由 K8s 管理内存</description>
+      </property>
+      <property>
+        <name>yarn.nodemanager.delete.debug-delay-sec</name>
+        <value>600</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.aux-services</name>
+        <value>mapreduce_shuffle</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name>
+        <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.local-dirs</name>
+        <value>/opt/hadoop/yarn/local</value>
+        <description>NodeManager 本地目录</description>
+      </property>
+      <property>
+        <name>yarn.nodemanager.log-dirs</name>
+        <value>/opt/hadoop/yarn/logs</value>
+        <description>NodeManager 日志目录</description>
+      </property>
+      <property>
+        <name>yarn.nodemanager.resource.memory-mb</name>
+        <value>8192</value>
+        <description>每个 NM 可分配内存 8GB</description>
+      </property>
+      <property>
+        <name>yarn.nodemanager.resource.cpu-vcores</name>
+        <value>4</value>
+        <description>每个 NM 可分配 CPU 核数 4</description>
+      </property>
+      <property>
+        <name>yarn.scheduler.minimum-allocation-mb</name>
+        <value>512</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.maximum-allocation-mb</name>
+        <value>8192</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.minimum-allocation-vcores</name>
+        <value>1</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.maximum-allocation-vcores</name>
+        <value>4</value>
+      </property>
+
+      <!-- ==================== 通用配置 ==================== -->
+      <property>
+        <name>yarn.acl.enable</name>
+        <value>true</value>
+        <description>生产环境启用 YARN ACL</description>
+      </property>
+      <property>
+        <name>yarn.admin.acl</name>
+        <value>hadoop</value>
+      </property>
+      <property>
+        <name>yarn.nodemanager.env-whitelist</name>
+        <value>JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,CLASSPATH_PREPEND_DISTCACHE,HADOOP_YARN_HOME,HADOOP_HOME,PATH,LANG,TZ,HADOOP_MAPRED_HOME</value>
+      </property>
+      <property>
+        <name>yarn.log-aggregation-enable</name>
+        <value>true</value>
+        <description>启用日志聚合，应用完成后日志自动上传到 HDFS</description>
+      </property>
+      <property>
+        <name>yarn.nodemanager.remote-app-log-dir</name>
+        <value>/yarn/logs</value>
+      </property>
+      <property>
+        <name>yarn.log.server.url</name>
+        <value>http://resourcemanager.hadoop.svc.cluster.local:19888/jobhistory</value>
+        <description>HA 修正：原写死 resourcemanager-0 单 Pod（被杀/变 standby 后历史链接失效）。改为 RM headless ClusterIP 服务 DNS（resourcemanager.hadoop.svc.cluster.local，Pod 死亡后仍稳定解析到当前 RM 端点），端口 19888 为 JobHistoryServer 标准端口。完整历史需单独部署 JobHistoryServer 并将此 URL 指向其服务</description>
+      </property>
+    </configuration>
+
+  mapred-site.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <property>
+        <name>mapreduce.framework.name</name>
+        <value>yarn</value>
+      </property>
+      <property>
+        <name>mapreduce.map.memory.mb</name>
+        <value>2048</value>
+        <description>Map 任务内存限制 2GB</description>
+      </property>
+      <property>
+        <name>mapreduce.reduce.memory.mb</name>
+        <value>4096</value>
+        <description>Reduce 任务内存限制 4GB</description>
+      </property>
+      <property>
+        <name>mapreduce.map.java.opts</name>
+        <value>-Xmx1638m</value>
+      </property>
+      <property>
+        <name>mapreduce.reduce.java.opts</name>
+        <value>-Xmx3276m</value>
+      </property>
+      <property>
+        <name>mapreduce.task.io.sort.mb</name>
+        <value>256</value>
+        <description>排序缓冲区 256MB</description>
+      </property>
+      <property>
+        <name>yarn.app.mapreduce.am.env</name>
+        <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+      </property>
+      <property>
+        <name>mapreduce.map.env</name>
+        <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+      </property>
+      <property>
+        <name>mapreduce.reduce.env</name>
+        <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+      </property>
+      <property>
+        <name>mapreduce.jobtracker.address</name>
+        <value>resourcemanager.hadoop.svc.cluster.local:8032</value>
+        <description>HA 修正：原写死 resourcemanager-0 单 Pod（MRv1 遗留属性，YARN 下由 yarn.resourcemanager.* + HA proxy 接管，普通作业不依赖）。改为 RM headless 服务 DNS:8032，避免单 Pod 被杀后 legacy 路径连不上。现代 YARN 作业不读此项</description>
+      </property>
+      <property>
+        <name>yarn.app.mapreduce.am.command-opts</name>
+        <value>-Xmx1024m -Dlog4j.configuration=file:///opt/hadoop/etc/hadoop/log4j.properties</value>
+      </property>
+      <property>
+        <name>yarn.app.mapreduce.am.webapp.address</name>
+        <value>0.0.0.0:0</value>
+        <description>AM 客户端 Web 服务绑定 0.0.0.0 + 临时端口，避免容器 hostname 反解/端口占用导致 MRClientService.getHttpPort() NPE</description>
+      </property>
+    </configuration>
+
+  log4j.properties: |
+    log4j.rootLogger=INFO, console
+    log4j.appender.console=org.apache.log4j.ConsoleAppender
+    log4j.appender.console.target=System.err
+    log4j.appender.console.layout=org.apache.log4j.PatternLayout
+    log4j.appender.console.layout.ConversionPattern=%d{ISO8601} %-5p [%t] %c{2}: %m%n
+    log4j.logger.org.apache.hadoop=WARN
+    log4j.logger.org.apache.hadoop.mapreduce=INFO
+
+  capacity-scheduler.xml: |
+    <?xml version="1.0"?>
+    <configuration>
+      <property>
+        <name>yarn.scheduler.capacity.maximum-applications</name>
+        <value>10000</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.maximum-am-resource-percent</name>
+        <value>0.2</value>
+        <description>AM 资源占比提升到 20%，避免大作业排队过长</description>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.resource-calculator</name>
+        <value>org.apache.hadoop.yarn.util.resource.DominantResourceCalculator</value>
+        <description>使用 DominantResourceCalculator 同时考虑 CPU 和内存，适合生产环境</description>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.queues</name>
+        <value>default,production</value>
+        <description>新增 production 队列，保障生产作业资源</description>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.capacity</name>
+        <value>40</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.maximum-capacity</name>
+        <value>60</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.user-limit-factor</name>
+        <value>1</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.state</name>
+        <value>RUNNING</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.acl_submit_applications</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.acl_administer_queue</name>
+        <value>hadoop</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.production.capacity</name>
+        <value>60</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.production.maximum-capacity</name>
+        <value>80</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.production.user-limit-factor</name>
+        <value>2</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.production.state</name>
+        <value>RUNNING</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.production.acl_submit_applications</name>
+        <value>hadoop</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.production.acl_administer_queue</name>
+        <value>hadoop</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.node-locality-delay</name>
+        <value>40</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.acl_application_max_priority</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.root.default.maximum-application-lifetime</name>
+        <value>-1</value>
+      </property>
+      <property>
+        <name>yarn.scheduler.capacity.rack-locality-additional-delay</name>
+        <value>-1</value>
+      </property>
+    </configuration>

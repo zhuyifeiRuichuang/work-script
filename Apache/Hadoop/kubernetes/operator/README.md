@@ -2,13 +2,13 @@
 
 使用主流AI工具开发Hadoop cluster在生产环境可用的operator。
 
-开发对比中，最终选择一个可用的标准方案。
-
 参考`https://github.com/zncdatadev/hdfs-operator`
 
+整体都在开发中，尚未输出最终版本。
 
 
-需求
+
+# 需求
 
 Hadoop operator
 

@@ -1,0 +1,185 @@
+---
+# 1. 内部 Headless 服务 (用于集群内部发现与 KRaft 选举)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  publishNotReadyAddresses: true
+  clusterIP: None
+  ports:
+    - name: broker
+      port: 19092
+      targetPort: 19092
+    - name: controller
+      port: 9093
+      targetPort: 9093
+  selector:
+    app: kafka
+
+---
+# 2. 外部暴露 NodePort 服务 (对应 Docker Compose 的 29092 端口)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-0-ext
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-0
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      # nodePort: 30092
+
+---
+# 3. 外部暴露 NodePort 服务 (对应 Docker Compose 的 39092 端口)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-1-ext
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-1
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      # nodePort: 30093
+
+---
+# 4. 外部暴露 NodePort 服务 (对应 Docker Compose 的 49092 端口)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-2-ext
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-2
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      # nodePort: 30094
+
+---
+# 5. StatefulSet 主体定义
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  # 规避kafka仲裁策略与k8s策略冲突问题
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      # 前置权限初始化，等价于原 init-kafka-perms
+      initContainers:
+        - name: init-kafka-perms
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/busybox:1.38.0
+          command: ['sh', '-c', 'chown -R 1000:1000 /tmp/kraft-combined-logs']
+          volumeMounts:
+            - name: kafka-logs
+              mountPath: /tmp/kraft-combined-logs
+      containers:
+        - name: kafka
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/kafka:4.3.1
+          # 启动前动态计算 ID 和对外暴露地址
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # 获取当前 Pod 的序号 (例如 kafka-0 -> 0)
+              ORDINAL=${HOSTNAME##*-}
+              # 节点 ID 从 1 开始 (匹配 QUORUM_VOTERS)
+              export KAFKA_NODE_ID=$((ORDINAL + 1))
+              
+              # 构建内部域名
+              INTERNAL_NAME="${HOSTNAME}.kafka-headless"
+              
+              # 匹配对应的 NodePort 端口 (30092 + ORDINAL)
+              EXTERNAL_PORT=$((30092 + ORDINAL))
+              
+              # 动态设置通告监听器，HOST_IP 为当前所在的 K8s 宿主机物理 IP
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${INTERNAL_NAME}:19092,PLAINTEXT_HOST://${HOST_IP}:${EXTERNAL_PORT}"
+              
+              # 移交控制权给 Kafka 原生启动脚本
+              exec /etc/kafka/docker/run
+          ports:
+            - containerPort: 19092
+              name: internal
+            - containerPort: 9092
+              name: external
+            - containerPort: 9093
+              name: controller
+          env:
+            # 通过 Downward API 获取宿主机的真实物理 IP
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            # 固定环境变量转换
+            - name: KAFKA_PROCESS_ROLES
+              value: 'broker,controller'
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+            # 内部选举与通信地址配置
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: '1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093'
+            - name: KAFKA_LISTENERS
+              value: 'PLAINTEXT://0.0.0.0:19092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:9092'
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: 'PLAINTEXT'
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: 'CONTROLLER'
+            - name: CLUSTER_ID
+              value: '4L6g3nShT-eMCtK--X86sw'
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: '2'
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: '1000'
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: '2'
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: '2'
+            - name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR
+              value: '2'
+            - name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR
+              value: '2'
+            - name: KAFKA_LOG_DIRS
+              value: '/tmp/kraft-combined-logs'
+          volumeMounts:
+            - name: kafka-logs
+              mountPath: /tmp/kraft-combined-logs
+          # 对应原文件的 healthcheck
+          readinessProbe:
+            exec:
+              command: ["/bin/bash", "-c", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 || exit 1"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 2
+  # 动态数据卷申请，取代 Docker Compose 中的本地 volume
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-logs
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 20Gi # 可根据实际测试环境需求调整存储大小

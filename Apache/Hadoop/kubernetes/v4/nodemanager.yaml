@@ -1,0 +1,196 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager
+  labels:
+    app: hadoop-nodemanager
+spec:
+  ports:
+    - port: 8042
+      name: web
+  clusterIP: None
+  selector:
+    app: hadoop-nodemanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager-external
+  labels:
+    app: hadoop-nodemanager
+spec:
+  type: NodePort
+  ports:
+    - port: 8042
+      name: web
+      targetPort: 8042
+  selector:
+    app: hadoop-nodemanager
+---
+# ==================== PodDisruptionBudget ====================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nodemanager-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: hadoop-nodemanager
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nodemanager
+  labels:
+    app: hadoop-nodemanager
+    component: yarn-nm
+spec:
+  serviceName: nodemanager
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hadoop-nodemanager
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+      maxUnavailable: 1
+  # Parallel: 3 个 NM Pod 同时启动，initContainer 各自等待 RM 就绪
+  # 比 OrderedReady 快——同时拉镜像、同时等 RM RPC，不互相阻塞
+  podManagementPolicy: Parallel
+  template:
+    metadata:
+      labels:
+        app: hadoop-nodemanager
+        component: yarn-nm
+    spec:
+      terminationGracePeriodSeconds: 60
+
+      # 反亲和性：NM Pod 分布到不同节点
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["hadoop-nodemanager"]
+              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["hadoop-resourcemanager"]
+                topologyKey: kubernetes.io/hostname
+
+      # 等待 RM 就绪
+      initContainers:
+      - name: wait-for-resourcemanager
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "正在检测 ResourceManager RPC 端口 (8032)..."
+            until nc -z resourcemanager-0.resourcemanager 8032 || nc -z resourcemanager-1.resourcemanager 8032; do
+              echo "  等待 ResourceManager 响应中..."
+              sleep 5
+            done
+            echo "ResourceManager 已就绪"
+        env:
+          - name: TZ
+            value: "Asia/Shanghai"
+
+      containers:
+      - name: nodemanager
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            # 修复 JVM InetAddress.getLocalHost() 返回 (unknown)（与 NN/ZKFC 同根因）
+            # 去 nsswitch 的 myhostname(避免本机名被合成 fe80::) + 本机名绑 127.0.0.1
+            sed -i 's/^hosts:.*/hosts:      files dns/' /etc/nsswitch.conf 2>/dev/null || echo "hosts:      files dns" >> /etc/nsswitch.conf
+            # 注意：不要把主机名绑 127.0.0.1 —— 否则 Java 反向解析 127.0.0.1 会得到 localhost，
+            # 导致 NM 以 localhost 注册、作业 AM 无法路由。K8s 注入的 /etc/hosts 已含
+            # <PodIP> <hostname>.<svc> <hostname>，getLocalHost() 据此返回 Pod FQDN。
+            exec yarn nodemanager
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_HEAPSIZE
+            value: "1024"
+          # JVM 时区：上海 (GMT+8)。JAVA_TOOL_OPTIONS 由 JVM 启动器无条件注入，
+          # 确保 NodeManager 进程日志时间戳与当前环境一致
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Duser.timezone=Asia/Shanghai"
+          - name: TZ
+            value: "Asia/Shanghai"
+        securityContext:
+          runAsUser: 0
+        ports:
+          - containerPort: 8042
+            name: web
+        # 资源限制：Guaranteed QOS
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        # 健康检查
+        livenessProbe:
+          tcpSocket:
+            port: 8042
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 5
+        readinessProbe:
+          tcpSocket:
+            port: 8042
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          tcpSocket:
+            port: 8042
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 15
+        volumeMounts:
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml
+            subPath: mapred-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/log4j.properties
+            subPath: log4j.properties
+          - name: nm-local-dir
+            mountPath: /opt/hadoop/yarn/local
+          - name: nm-log-dir
+            mountPath: /opt/hadoop/yarn/logs
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: nm-local-dir
+          emptyDir:
+            sizeLimit: 20Gi
+        - name: nm-log-dir
+          emptyDir:
+            sizeLimit: 10Gi

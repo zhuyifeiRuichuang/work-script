@@ -1,0 +1,104 @@
+# Per-pod NodePort services for deterministic Hadoop HA web access.
+#
+# Problem: the default resourcemanager-external / nodemanager-external services use a
+# StatefulSet-wide selector (app: hadoop-*) which load-balances across ALL pods. In HA
+# mode that means you randomly hit the STANDBY RM (empty node table) or a random NM.
+#
+# Fix: each service pins ONE pod via the statefulset.kubernetes.io/pod-name label, so
+# every RM/NM gets its OWN stable service — no more random standby hits. The NodePort is
+# left UNSPECIFIED so Kubernetes assigns a random port from the 30000-32767 range
+# (no manual port management, no collision risk).
+#
+# Apply:
+#   kubectl apply -f web-ui-access.yaml -n hadoop
+#
+# Discover the auto-assigned ports after apply:
+#   kubectl get svc -n hadoop -l app=hadoop-webui
+#   (or: kubectl get svc -n hadoop | grep -E 'resourcemanager-[01]-external|nodemanager-[012]-external')
+#
+# Browse (replace <node-ip> with any worker node IP, e.g. 172.16.0.12):
+#   RM : http://<node-ip>:<rm-port>/cluster/nodes      (pick the ACTIVE rm via `yarn rmadmin -getServiceState`)
+#   NM : http://<node-ip>:<nm-port>/node
+#
+# Simpler alternative for watching failover (zero service changes):
+#   kubectl port-forward -n hadoop pod/resourcemanager-<active> 8088:8088
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager-0-external
+  namespace: hadoop
+  labels:
+    app: hadoop-webui
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: resourcemanager-0
+  ports:
+    - name: web
+      port: 8088
+      targetPort: 8088
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager-1-external
+  namespace: hadoop
+  labels:
+    app: hadoop-webui
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: resourcemanager-1
+  ports:
+    - name: web
+      port: 8088
+      targetPort: 8088
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager-0-external
+  namespace: hadoop
+  labels:
+    app: hadoop-webui
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: nodemanager-0
+  ports:
+    - name: web
+      port: 8042
+      targetPort: 8042
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager-1-external
+  namespace: hadoop
+  labels:
+    app: hadoop-webui
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: nodemanager-1
+  ports:
+    - name: web
+      port: 8042
+      targetPort: 8042
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodemanager-2-external
+  namespace: hadoop
+  labels:
+    app: hadoop-webui
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: nodemanager-2
+  ports:
+    - name: web
+      port: 8042
+      targetPort: 8042

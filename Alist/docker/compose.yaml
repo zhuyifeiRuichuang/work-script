@@ -1,16 +1,24 @@
 services:
   alist:
-    image: ghcr.io/alistgo/alist:v3.61.0
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/alistgo/alist:v3.62.0
     container_name: alist
     volumes:
-      - 'alist_data:/opt/alist/data'
+      - alist_data:/opt/alist/data
+      - ./config.json:/opt/alist/data/config.json
     ports:
-      - '5244:5244'
+      - "5244:5244"
     environment:
       - PUID=0
       - PGID=0
       - UMASK=022
     restart: unless-stopped
+    networks:
+      alist-net:
+
 volumes:
   alist_data:
     name: alist_data
+
+networks:
+  alist-net:
+    name: alist-net

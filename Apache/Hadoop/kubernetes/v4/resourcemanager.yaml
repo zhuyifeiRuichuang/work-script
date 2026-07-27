@@ -1,0 +1,221 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager
+  labels:
+    app: hadoop-resourcemanager
+spec:
+  ports:
+    - port: 8088
+      name: web
+    - port: 8032
+      name: rpc
+  clusterIP: None
+  selector:
+    app: hadoop-resourcemanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resourcemanager-external
+  labels:
+    app: hadoop-resourcemanager
+spec:
+  type: NodePort
+  ports:
+    - port: 8088
+      name: web
+      targetPort: 8088
+      # nodePort: 30088
+    - port: 8032
+      name: rpc
+      targetPort: 8032
+  selector:
+    app: hadoop-resourcemanager
+---
+# ==================== PodDisruptionBudget ====================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: resourcemanager-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hadoop-resourcemanager
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: resourcemanager
+  labels:
+    app: hadoop-resourcemanager
+    component: yarn-rm
+spec:
+  serviceName: resourcemanager
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hadoop-resourcemanager
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-resourcemanager
+        component: yarn-rm
+    spec:
+      terminationGracePeriodSeconds: 60
+
+      # 反亲和性：
+      # 1) 硬反亲和：2 个 RM 必须分布到不同节点（HA 仲裁安全，避免同节点 SPOF）
+      # 2) 软反亲和：RM 尽量不与 NM 同节点（打散）
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["hadoop-resourcemanager"]
+              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["hadoop-nodemanager"]
+                topologyKey: kubernetes.io/hostname
+
+      # 关键修复：RM 的 HDFS 状态存储(/yarn/rmstate) 启动时会向 HDFS mkdir，
+      # 若 NN 仍在安全模式(0 live DN) 会 SafeModeException 导致 RM 崩溃。
+      # 此处等安全模式退出(需 min.datanodes=3 个 DN 注册后自动退出)再启动 RM，
+      # 避免“RM 早于 DN 就绪”引发的崩溃循环。与 NN/ZKFC 的 nsswitch 修复无关系。
+      initContainers:
+      - name: wait-for-hdfs
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            # 修 JVM getLocalHost()=(unknown)（init 容器默认无此修复，hdfs dfsadmin 客户端会因
+            # 本地主机名解析失败而连不上 NN，导致下面 safemode 检查永远拿不到 OFF、陷入死循环）
+            sed -i 's/^hosts:.*/hosts:      files dns/' /etc/nsswitch.conf 2>/dev/null || echo "hosts:      files dns" >> /etc/nsswitch.conf
+            if ! grep -q "^127.0.0.1 $(hostname)" /etc/hosts 2>/dev/null; then
+              echo "127.0.0.1 $(hostname) $(hostname -f 2>/dev/null)" >> /etc/hosts
+            fi
+            echo "等待 HDFS 退出安全模式（需 min.datanodes=3 个 DN 注册后才自动退出）..."
+            echo "否则 RM 的 HDFS 状态存储 /yarn/rmstate mkdir 会因 SafeModeException 崩溃"
+            # 关键：用 2>&1 把 stderr 也纳入，并实时打印原始输出便于排障。
+            # （hdfs dfsadmin 的状态常打到 stderr，单纯管道 stdout 会漏掉 → 永远匹配不到 OFF → 死循环）
+            until out=$(hdfs dfsadmin -safemode get 2>&1); echo "  [DEBUG] dfsadmin 原始输出: $out"; echo "$out" | grep -q 'Safe mode is OFF'; do
+              echo "  [$(date +%H:%M:%S)] 仍在安全模式 / NN 未就绪，10s 后重试..."
+              sleep 10
+            done
+            echo "HDFS 已退出安全模式，启动 ResourceManager"
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          # JVM 时区：上海 (GMT+8)。hdfs dfsadmin 是 JVM 进程，日志/时间判定与当前环境一致
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Duser.timezone=Asia/Shanghai"
+          - name: TZ
+            value: "Asia/Shanghai"
+        volumeMounts:
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+
+      containers:
+      - name: resourcemanager
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            # 修复 JVM InetAddress.getLocalHost() 返回 (unknown)（与 NN/ZKFC 同根因）
+            # 去 nsswitch 的 myhostname(避免本机名被合成 fe80::) + 本机名绑 127.0.0.1
+            sed -i 's/^hosts:.*/hosts:      files dns/' /etc/nsswitch.conf 2>/dev/null || echo "hosts:      files dns" >> /etc/nsswitch.conf
+            if ! grep -q "^127.0.0.1 $(hostname)" /etc/hosts 2>/dev/null; then
+              echo "127.0.0.1 $(hostname) $(hostname -f 2>/dev/null)" >> /etc/hosts
+            fi
+            exec yarn resourcemanager
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_HEAPSIZE
+            value: "2048"
+          # JVM 时区：上海 (GMT+8)。JAVA_TOOL_OPTIONS 由 JVM 启动器无条件注入，
+          # 确保 ResourceManager 进程日志时间戳与当前环境一致
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Duser.timezone=Asia/Shanghai"
+          - name: TZ
+            value: "Asia/Shanghai"
+        securityContext:
+          runAsUser: 0
+        ports:
+          - containerPort: 8088
+            name: web
+          - containerPort: 8032
+            name: rpc
+        # 资源限制：Guaranteed QOS
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        # 健康检查
+        livenessProbe:
+          httpGet:
+            path: /ws/v1/cluster/info
+            port: 8088
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /ws/v1/cluster/info
+            port: 8088
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          httpGet:
+            path: /ws/v1/cluster/info
+            port: 8088
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 15
+        volumeMounts:
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/mapred-site.xml
+            subPath: mapred-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/capacity-scheduler.xml
+            subPath: capacity-scheduler.xml
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config

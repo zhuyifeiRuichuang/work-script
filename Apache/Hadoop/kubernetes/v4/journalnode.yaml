@@ -1,0 +1,210 @@
+# ============================================================
+# JournalNode 集群 — Hadoop NameNode HA 依赖组件
+# 3 节点仲裁集群，硬反亲和分布到不同 K8s 节点
+# 用途：共享编辑日志 (Shared Edits Log)，Active NN 写入，Standby NN 读取同步
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: journalnode
+  labels:
+    app: hadoop-journalnode
+    component: ha-journalnode
+spec:
+  ports:
+    - port: 8485
+      name: rpc
+    - port: 8480
+      name: http
+  clusterIP: None
+  selector:
+    app: hadoop-journalnode
+---
+# ==================== PodDisruptionBudget ====================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: journalnode-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: hadoop-journalnode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: journalnode
+  labels:
+    app: hadoop-journalnode
+    component: ha-journalnode
+spec:
+  serviceName: journalnode
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hadoop-journalnode
+  # Parallel: 3 个 JN Pod 同时启动，各自等待仲裁形成（JN 之间无启动顺序依赖）
+  # NN initContainer 会等待 JN ≥2/3 就绪，Parallel 不影响 HA 初始化
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-journalnode
+        component: ha-journalnode
+    spec:
+      terminationGracePeriodSeconds: 30
+
+      # 硬反亲和：3 个 JN Pod 必须分布到不同节点（仲裁安全性要求）
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["hadoop-journalnode"]
+              topologyKey: kubernetes.io/hostname
+          # 软约束：尽量避免与 NameNode/DataNode 同节点
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 30
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["hadoop-namenode", "hadoop-datanode"]
+                topologyKey: kubernetes.io/hostname
+
+      # --- 1. 初始化容器：准备数据目录 + 权限校准 ---
+      initContainers:
+      - name: init-journalnode
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            echo "=== 初始化 JournalNode 数据目录 ==="
+            mkdir -p /opt/hadoop/data/jn
+
+            if id "hadoop" >/dev/null 2>&1; then
+              echo "检测到 hadoop 用户，执行 chown hadoop:hadoop"
+              chown -R hadoop:hadoop /opt/hadoop/data/jn
+            else
+              echo "未检测到 hadoop 用户，回退使用 UID 1000"
+              chown -R 1000:1000 /opt/hadoop/data/jn
+            fi
+            chmod -R 755 /opt/hadoop/data/jn
+            echo "JournalNode 数据目录初始化完成"
+        env:
+          - name: TZ
+            value: "Asia/Shanghai"
+        volumeMounts:
+          - name: hadoop-jn-data
+            mountPath: /opt/hadoop/data/jn
+            subPath: jn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+
+      # --- 2. 主容器：运行 JournalNode ---
+      containers:
+      - name: journalnode
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args: ["exec hdfs journalnode"]
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: HADOOP_HEAPSIZE
+            value: "512"
+          # JVM 时区：上海 (GMT+8)。JAVA_TOOL_OPTIONS 由 JVM 启动器无条件注入，
+          # 确保 JournalNode 进程日志时间戳与当前环境一致
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Duser.timezone=Asia/Shanghai"
+          - name: TZ
+            value: "Asia/Shanghai"
+        securityContext:
+          runAsUser: 0
+        ports:
+          - containerPort: 8485
+            name: rpc
+          - containerPort: 8480
+            name: http
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /jmx
+            port: 8480
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /jmx
+            port: 8480
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 5
+        startupProbe:
+          httpGet:
+            path: /jmx
+            port: 8480
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 12
+        volumeMounts:
+          - name: hadoop-jn-data
+            mountPath: /opt/hadoop/data/jn
+            subPath: jn
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-logs
+          emptyDir: {}
+
+  # --- 存储卷模板 ---
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-jn-data
+      labels:
+        app: hadoop-journalnode
+        volume-role: jn-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "openebs-hostpath"
+      resources:
+        requests:
+          storage: 20Gi

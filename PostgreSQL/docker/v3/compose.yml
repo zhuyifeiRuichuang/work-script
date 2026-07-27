@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/postgres:18.4
+    container_name: postgres-prod
+    restart: unless-stopped
+    # 推荐的生产环境资源限制配置 (可根据实际情况调整)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    # 解决部分高负载场景下的共享内存不足问题
+    shm_size: 1g
+    ports:
+      - "5432:5432"
+    environment:
+      # 使用 Docker Secrets 挂载密码文件，比明文环境变量更安全
+      POSTGRES_USER_FILE: /run/secrets/pg_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      POSTGRES_DB: prod_db
+      # 官方文档强烈建议将 PGDATA 设为挂载卷的子目录，避免权限冲突
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # 设置时区
+      TZ: Asia/Shanghai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 挂载自定义配置文件
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # 挂载初始化脚本，仅在首次启动数据库时执行
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    secrets:
+      - pg_user
+      - pg_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$(cat /run/secrets/pg_user) -d prod_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pgnet
+
+  # 可选。Adminer 轻量Web管理工具，适用于无数据库工具需管理数据库的场景。
+  adminer:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/adminer:5.4.2
+    container_name: adminer
+    restart: always
+    networks:
+      - pgnet
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    name: pg-data
+
+secrets:
+  pg_user:
+    file: ./secrets/pg_user.txt
+  pg_password:
+    file: ./secrets/pg_password.txt
+
+networks:
+  pgnet:
+    name: pg-net
+    driver: bridge

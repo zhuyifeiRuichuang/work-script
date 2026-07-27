@@ -18,6 +18,7 @@ operator处于开发阶段，不可在生产环境使用。
 | v1 | namenode,datanode支持数据持久化，支持集群内外访问。 |
 | v2 | 基于v1，新增对hive的支持，对tez的支持。新增datanode延迟启动，规避datanode先于namenode启动产生的集群关系连接失败。|
 | v3 | 基于v2, 解决了namenode初始化强制格式化的问题。解决了datanode因namenode反向DNS解析失败无法建立连接的问题。 |
+| v4 | 基于v3，整体搞可用。 |
 
 # 遗留问题
 ## 问题1

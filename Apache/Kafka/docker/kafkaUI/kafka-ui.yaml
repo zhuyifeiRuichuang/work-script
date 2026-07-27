@@ -1,0 +1,25 @@
+services:
+  # Kafka UI
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "18080:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=kafka-cluster
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka-1:19092,kafka-2:19092,kafka-3:19092
+      - DYNAMIC_CONFIG_ENABLED=true
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    networks:
+      - kafka
+    restart: unless-stopped
+networks:
+  kafka:
+    name: kafka
+    external: true

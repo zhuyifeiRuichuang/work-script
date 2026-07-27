@@ -1,0 +1,249 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode
+  labels:
+    app: hadoop-datanode
+spec:
+  ports:
+    - port: 9864
+      name: web
+    - port: 9866
+      name: data
+    - port: 9867
+      name: ipc
+  clusterIP: None
+  selector:
+    app: hadoop-datanode
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode-external
+  labels:
+    app: hadoop-datanode
+spec:
+  type: NodePort
+  ports:
+    - port: 9864
+      name: web
+      targetPort: 9864
+    - port: 9866
+      name: data
+      targetPort: 9866
+  selector:
+    app: hadoop-datanode
+---
+# ==================== PodDisruptionBudget ====================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: datanode-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+  labels:
+    app: hadoop-datanode
+    component: hdfs-datanode
+spec:
+  serviceName: datanode
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  # 逐个滚动更新，确保 HDFS 副本数始终满足最低要求
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+      maxUnavailable: 1
+  # Parallel: 3 个 DN Pod 同时启动，initContainer 各自等待 NN 就绪
+  # 比 OrderedReady 快——同时拉镜像、同时等 NN RPC，不互相阻塞
+  podManagementPolicy: Parallel
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+        component: hdfs-datanode
+    spec:
+      # 优雅停机：DataNode 需要时间通知 NameNode 下线并完成数据汇报
+      terminationGracePeriodSeconds: 90
+
+      securityContext:
+        fsGroup: 1000
+
+      # 反亲和性：强制 DataNode Pod 分布到不同节点
+      affinity:
+        podAntiAffinity:
+          # 硬约束：同一节点不允许运行两个 DataNode Pod
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["hadoop-datanode"]
+              topologyKey: kubernetes.io/hostname
+          # 软约束：尽量避免与 NameNode 同节点
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["hadoop-namenode"]
+                topologyKey: kubernetes.io/hostname
+
+      initContainers:
+      # --- 1. 等待 NameNode RPC 端口就绪 (HA 模式：nn1 或 nn2 任一可用即可) ---
+      - name: wait-for-namenode
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "正在检测 NameNode RPC 端口 (HA 模式: nn1 + nn2)..."
+            until nc -z namenode-0.namenode 9000 || \
+                  nc -z namenode-1.namenode 9000; do
+              echo "  等待任一 NameNode 响应中..."
+              sleep 5
+            done
+            echo "NameNode RPC 已就绪 (至少一个 NameNode 可用)"
+        env:
+          - name: TZ
+            value: "Asia/Shanghai"
+
+      # --- 2. 权限校准（动态识别 hadoop 用户 UID） ---
+      - name: init-permissions
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            echo "正在准备数据目录并校准权限..."
+            mkdir -p /opt/hadoop/data/dn
+            
+            if id "hadoop" >/dev/null 2>&1; then
+              echo "检测到 hadoop 用户，执行 chown hadoop:hadoop"
+              chown -R hadoop:hadoop /opt/hadoop/data
+            else
+              echo "未检测到 hadoop 用户，回退使用 UID 1000"
+              chown -R 1000:1000 /opt/hadoop/data
+            fi
+            
+            # 授予 775 权限确保 DataNode 内部检查通过
+            chmod -R 775 /opt/hadoop/data
+            echo "权限校准完成"
+        env:
+          - name: TZ
+            value: "Asia/Shanghai"
+        volumeMounts:
+          - name: hadoop-dn-data
+            mountPath: /opt/hadoop/data/dn
+            subPath: dn
+
+      containers:
+      - name: datanode
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            export HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+            echo "启动 DataNode..."
+            exec hdfs datanode
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_HEAPSIZE
+            value: "1024"
+          # JVM 时区：上海 (GMT+8)。JAVA_TOOL_OPTIONS 由 JVM 启动器无条件注入，
+          # 确保 DataNode 进程日志时间戳与当前环境一致
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Duser.timezone=Asia/Shanghai"
+          - name: TZ
+            value: "Asia/Shanghai"
+        ports:
+          - containerPort: 9864
+            name: web
+          - containerPort: 9866
+            name: data
+          - containerPort: 9867
+            name: ipc
+        # 资源限制：生产级 Guaranteed QOS
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        # 健康检查：使用更可靠的 JMX 端点
+        livenessProbe:
+          httpGet:
+            path: /jmx
+            port: 9864
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /jmx
+            port: 9864
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          httpGet:
+            path: /jmx
+            port: 9864
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 12
+        volumeMounts:
+          - name: hadoop-dn-data
+            mountPath: /opt/hadoop/data/dn
+            subPath: dn
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/core-site.xml
+            subPath: core-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/hdfs-site.xml
+            subPath: hdfs-site.xml
+          - name: hadoop-config-volume
+            mountPath: /opt/hadoop/etc/hadoop/yarn-site.xml
+            subPath: yarn-site.xml
+
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+
+  # --- 存储卷模板 ---
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-dn-data
+      labels:
+        app: hadoop-datanode
+        volume-role: dn-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "openebs-hostpath"
+      resources:
+        requests:
+          storage: 100Gi

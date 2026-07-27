@@ -8,9 +8,9 @@ data:
   config.json: |
     {
       "force": false,
-      "site_url": "/alist",
+      "site_url": "",
       "cdn": "",
-      "jwt_secret": "",
+      "jwt_secret": "YRaOORpTQDoWMQn5",
       "token_expires_in": 48,
       "database": {
         "type": "sqlite3",
@@ -54,21 +54,55 @@ data:
       "delayed_start": 0,
       "max_connections": 0,
       "max_concurrency": 64,
-      "tls_insecure_skip_verify": true,
+      "tls_insecure_skip_verify": false,
       "tasks": {
-        "download": {"workers": 5, "max_retry": 1, "task_persistant": false},
-        "transfer": {"workers": 5, "max_retry": 2, "task_persistant": false},
-        "upload": {"workers": 5, "max_retry": 0, "task_persistant": false},
-        "copy": {"workers": 5, "max_retry": 2, "task_persistant": false},
-        "decompress": {"workers": 5, "max_retry": 2, "task_persistant": false},
-        "decompress_upload": {"workers": 5, "max_retry": 2, "task_persistant": false},
-        "s3_transition": {"workers": 5, "max_retry": 2, "task_persistant": false},
+        "download": {
+          "workers": 5,
+          "max_retry": 1,
+          "task_persistant": false
+        },
+        "transfer": {
+          "workers": 5,
+          "max_retry": 2,
+          "task_persistant": false
+        },
+        "upload": {
+          "workers": 5,
+          "max_retry": 0,
+          "task_persistant": false
+        },
+        "copy": {
+          "workers": 5,
+          "max_retry": 2,
+          "task_persistant": false
+        },
+        "decompress": {
+          "workers": 5,
+          "max_retry": 2,
+          "task_persistant": false
+        },
+        "decompress_upload": {
+          "workers": 5,
+          "max_retry": 2,
+          "task_persistant": false
+        },
+        "s3_transition": {
+          "workers": 5,
+          "max_retry": 2,
+          "task_persistant": false
+        },
         "allow_retry_canceled": false
       },
       "cors": {
-        "allow_origins": ["*"],
-        "allow_methods": ["*"],
-        "allow_headers": ["*"]
+        "allow_origins": [
+          "*"
+        ],
+        "allow_methods": [
+          "*"
+        ],
+        "allow_headers": [
+          "*"
+        ]
       },
       "s3": {
         "enable": false,
@@ -95,7 +129,7 @@ data:
         "enable": false,
         "port": 5248
       },
-      "last_launched_version": ""
+      "last_launched_version": "v3.62.0"
     }
 ---
 apiVersion: v1
@@ -143,7 +177,7 @@ spec:
 
       containers:
         - name: alist-container
-          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/alistgo/alist:v3.61.0
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/alistgo/alist:v3.62.0
 
           imagePullPolicy: IfNotPresent
 

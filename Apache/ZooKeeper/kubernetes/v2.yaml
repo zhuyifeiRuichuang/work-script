@@ -1,0 +1,179 @@
+# ============================================================
+# ZooKeeper 集群 — Hadoop NameNode HA 依赖组件
+# 3 节点仲裁集群，硬反亲和分布到不同 K8s 节点
+# 用途：ZKFC leader 选举 + 自动故障切换
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: hadoop
+  labels:
+    app: zookeeper
+    component: ha-zookeeper
+spec:
+  ports:
+    - port: 2181
+      name: client
+    - port: 2888
+      name: follower
+    - port: 3888
+      name: election
+  clusterIP: None
+  selector:
+    app: zookeeper
+---
+# ==================== PodDisruptionBudget ====================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zookeeper-pdb
+  namespace: hadoop
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: zookeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: hadoop
+  labels:
+    app: zookeeper
+    component: ha-zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+  # Parallel: 3 个 ZK Pod 同时启动，各自等待仲裁形成（ZK 设计支持任意顺序启动）
+  # 比 OrderedReady 快很多——3 Pod 同时拉镜像、同时初始化、同时等 quorum
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+        component: ha-zookeeper
+    spec:
+      terminationGracePeriodSeconds: 30
+
+      # 硬反亲和：3 个 ZK Pod 必须分布到不同节点（仲裁安全性要求）
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["zookeeper"]
+              topologyKey: kubernetes.io/hostname
+          # 软约束：尽量避免与 Hadoop 组件同节点
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 30
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["hadoop-namenode", "hadoop-datanode"]
+                topologyKey: kubernetes.io/hostname
+
+      # --- 1. 初始化容器：写入 myid 文件 ---
+      initContainers:
+      - name: init-myid
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/zookeeper:3.4.14
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            ORDINAL=${HOSTNAME##*-}
+            MYID=$((ORDINAL + 1))
+            echo "Writing myid=${MYID} to /data/myid"
+            mkdir -p /data
+            echo "${MYID}" > /data/myid
+            cat /data/myid
+        volumeMounts:
+          - name: zk-data
+            mountPath: /data
+
+      # --- 2. 主容器：运行 ZooKeeper ---
+      containers:
+      - name: zookeeper
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/zookeeper:3.4.14
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: ZOO_TICK_TIME
+            value: "2000"
+          - name: ZOO_INIT_LIMIT
+            value: "10"
+          - name: ZOO_SYNC_LIMIT
+            value: "5"
+          - name: ZOO_MAX_CLIENT_CNXS
+            value: "0"
+          - name: ZOO_AUTOPURGE_SNAPRETAINCOUNT
+            value: "3"
+          - name: ZOO_AUTOPURGE_PURGEINTERVAL
+            value: "1"
+          - name: ZOO_SERVERS
+            value: "server.1=zookeeper-0.zookeeper.hadoop.svc.cluster.local:2888:3888 server.2=zookeeper-1.zookeeper.hadoop.svc.cluster.local:2888:3888 server.3=zookeeper-2.zookeeper.hadoop.svc.cluster.local:2888:3888"
+        ports:
+          - containerPort: 2181
+            name: client
+          - containerPort: 2888
+            name: follower
+          - containerPort: 3888
+            name: election
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        readinessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "echo ruok | nc 127.0.0.1 2181 | grep imok"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "echo ruok | nc 127.0.0.1 2181 | grep imok"]
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 5
+        startupProbe:
+          exec:
+            command: ["/bin/sh", "-c", "echo ruok | nc 127.0.0.1 2181 | grep imok"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 12
+        volumeMounts:
+          - name: zk-data
+            mountPath: /data
+
+      volumes: []
+
+  # --- 存储卷模板 ---
+  volumeClaimTemplates:
+  - metadata:
+      name: zk-data
+      labels:
+        app: zookeeper
+        volume-role: zk-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "openebs-hostpath"
+      resources:
+        requests:
+          storage: 10Gi

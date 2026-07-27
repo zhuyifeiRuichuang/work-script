@@ -1,0 +1,337 @@
+---
+# ==========================================
+# 0. RBAC 权限配置 (允许 Pod 读取 Service 属性)
+# ==========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka-sa
+  labels:
+    app: kafka
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kafka-service-reader
+  labels:
+    app: kafka
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kafka-service-reader-binding
+  labels:
+    app: kafka
+subjects:
+  - kind: ServiceAccount
+    name: kafka-sa
+roleRef:
+  kind: Role
+  name: kafka-service-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ==========================================
+# 1. 内部 Headless 服务 (用于集群发现与选举)
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  publishNotReadyAddresses: true
+  clusterIP: None
+  ports:
+    - name: broker
+      port: 19092
+      targetPort: 19092
+    - name: controller
+      port: 9093
+      targetPort: 9093
+  selector:
+    app: kafka
+
+---
+# ==========================================
+# 2. 外部暴露 NodePort 服务 (kafka-0)
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-0-ext
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-0
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      nodePort: 30092 # <-- 可随意修改
+
+---
+# ==========================================
+# 3. 外部暴露 NodePort 服务 (kafka-1)
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-1-ext
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-1
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      nodePort: 30093 # <-- 可随意修改
+
+---
+# ==========================================
+# 4. 外部暴露 NodePort 服务 (kafka-2)
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-2-ext
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-2
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      nodePort: 30094 # <-- 可随意修改
+
+---
+# ==========================================
+# 5. StatefulSet 主体定义
+# ==========================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      serviceAccountName: kafka-sa # <-- 绑定 RBAC 账户
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - kafka
+                topologyKey: kubernetes.io/hostname
+      
+      # ----------------------------------------------------
+      # 重构后的 InitContainer (同时负责权限修复和API获取)
+      # ----------------------------------------------------
+      initContainers:
+        - name: init-kafka
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/busybox:1.38.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 1. 修复数据目录权限
+              chown -R 1000:1000 /tmp/kraft-combined-logs
+              
+              # 2. 利用 busybox 自带的 wget 请求 API 获取端口
+              ORDINAL=${HOSTNAME##*-}
+              APISERVER="https://kubernetes.default.svc"
+              SERVICEACCOUNT="/var/run/secrets/kubernetes.io/serviceaccount"
+              TOKEN=$(cat ${SERVICEACCOUNT}/token)
+              NAMESPACE=$(cat ${SERVICEACCOUNT}/namespace)
+              
+              echo "Fetching NodePort for Service [ ${HOSTNAME}-ext ] in namespace [ ${NAMESPACE} ] using wget..."
+              
+              # 发送 HTTPS 请求 (通过 --no-check-certificate 跳过集群内自签证书验证)
+              SVC_JSON=$(wget --no-check-certificate --header="Authorization: Bearer ${TOKEN}" -qO- ${APISERVER}/api/v1/namespaces/${NAMESPACE}/services/${HOSTNAME}-ext)
+              
+              # 提取 nodePort (兼容纯净 busybox 中的 grep)
+              EXTERNAL_PORT=$(echo "$SVC_JSON" | grep -o '"nodePort": *[0-9]*' | grep -o '[0-9]*' | head -n 1)
+              
+              if [ -z "$EXTERNAL_PORT" ]; then
+                echo "ERROR: Failed to retrieve NodePort from K8s API."
+                echo "API Response: $SVC_JSON"
+                exit 1
+              fi
+              
+              echo "Successfully retrieved dynamic NodePort: ${EXTERNAL_PORT}"
+              
+              # 3. 将结果写入共享卷
+              echo "${EXTERNAL_PORT}" > /tmp/shared/nodeport
+          volumeMounts:
+            - name: kafka-logs
+              mountPath: /tmp/kraft-combined-logs
+            - name: shared-data             # <-- 挂载临时共享目录
+              mountPath: /tmp/shared
+              
+      containers:
+        - name: kafka
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/kafka:4.3.1
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # 1. 基础环境获取
+              ORDINAL=${HOSTNAME##*-}
+              export KAFKA_NODE_ID=$((ORDINAL + 1))
+              INTERNAL_NAME="${HOSTNAME}.kafka-headless"
+              
+              # 2. 从临时共享目录直接读取已获取的端口号
+              if [ ! -f "/tmp/shared/nodeport" ]; then
+                echo "ERROR: nodeport file not found in /tmp/shared!"
+                exit 1
+              fi
+              EXTERNAL_PORT=$(cat /tmp/shared/nodeport)
+              echo "Successfully read NodePort from shared volume: ${EXTERNAL_PORT}"
+              
+              # 3. 注入动态监听器并启动 Kafka
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${INTERNAL_NAME}:19092,PLAINTEXT_HOST://${HOST_IP}:${EXTERNAL_PORT}"
+              
+              exec /etc/kafka/docker/run
+          ports:
+            - containerPort: 19092
+              name: internal
+            - containerPort: 9092
+              name: external
+            - containerPort: 9093
+              name: controller
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: KAFKA_PROCESS_ROLES
+              value: 'broker,controller'
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: '1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093'
+            - name: KAFKA_LISTENERS
+              value: 'PLAINTEXT://0.0.0.0:19092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:9092'
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: 'PLAINTEXT'
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: 'CONTROLLER'
+            - name: CLUSTER_ID
+              value: '4L6g3nShT-eMCtK--X86sw'
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: '2'
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: '1000'
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: '2'
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: '2'
+            - name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR
+              value: '2'
+            - name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR
+              value: '2'
+            - name: KAFKA_LOG_DIRS
+              value: '/tmp/kraft-combined-logs'
+          volumeMounts:
+            - name: kafka-logs
+              mountPath: /tmp/kraft-combined-logs
+            - name: shared-data             # <-- 挂载临时共享目录
+              mountPath: /tmp/shared
+          readinessProbe:
+            exec:
+              command: ["/bin/bash", "-c", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 || exit 1"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 2
+            
+      # 定义 Pod 的卷信息
+      volumes:
+        - name: shared-data
+          emptyDir: {}                        # <-- 在内存中使用的临时挂载卷，Pod 重启时自动销毁
+          
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-logs
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+# ==========================================
+# 6. Kafka UI 部署定义
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  labels:
+    app: kafka-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+    spec:
+      containers:
+        - name: kafka-ui
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/provectuslabs/kafka-ui:v0.7.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: "kafka-cluster"
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: "kafka-0.kafka-headless:19092,kafka-1.kafka-headless:19092,kafka-2.kafka-headless:19092"
+            - name: DYNAMIC_CONFIG_ENABLED
+              value: "true"
+
+---
+# ==========================================
+# 7. Kafka UI 外部访问 NodePort
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui-ext
+  labels:
+    app: kafka-ui
+spec:
+  type: NodePort
+  selector:
+    app: kafka-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      # 此处不需要指定端口
+      # nodePort: 31808

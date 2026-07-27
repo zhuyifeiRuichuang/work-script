@@ -1,0 +1,485 @@
+# ============================================================
+# NameNode HA — Active/Standby 双节点 + ZKFC 自动故障切换
+# namenode-0 = nn1 (初始 Active), namenode-1 = nn2 (初始 Standby)
+# 存储使用 openebs-hostpath (local)，HA 机制保证节点故障后数据不丢失
+# ZKFC sidecar 与 NameNode 共享 Pod 网络命名空间
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+spec:
+  ports:
+    - port: 9870
+      name: web
+    - port: 9000
+      name: rpc
+    - port: 8019
+      name: zkfc
+  clusterIP: None
+  selector:
+    app: hadoop-namenode
+---
+# 外部访问 Service (NodePort)
+# 注意：HA 模式下 RPC NodePort 可能指向 Active 或 Standby NN
+# 外部客户端应使用 HA 逻辑 URI (hdfs://mycluster) + ConfiguredFailoverProxyProvider
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode-external
+  labels:
+    app: hadoop-namenode
+spec:
+  type: NodePort
+  ports:
+    - port: 9870
+      name: web
+      targetPort: 9870
+      # nodePort: 30070
+    - port: 9000
+      name: rpc
+      targetPort: 9000
+      # nodePort: 30090
+  selector:
+    app: hadoop-namenode
+---
+# ==================== PodDisruptionBudget ====================
+# HA 模式下至少 1 个 NN 存活（Active 或 Standby）
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: namenode-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: namenode
+  labels:
+    app: hadoop-namenode
+    component: hdfs-namenode
+spec:
+  serviceName: namenode
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  # OrderedReady: namenode-0 先启动完成（Ready）后 namenode-1 才启动
+  # 保证 bootstrapStandby 时 Active NN 已在运行
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+        component: hdfs-namenode
+    spec:
+      # 优雅停机：给 ZKFC 释放 Active 锁 + NN 刷盘的时间
+      terminationGracePeriodSeconds: 60
+
+      # 硬反亲和：两个 NN Pod 必须在不同节点
+      # 这是 HA 的基础：同一节点故障不能同时杀死两个 NN
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["hadoop-namenode"]
+              topologyKey: kubernetes.io/hostname
+          # 软约束：尽量避免与 DataNode 同节点
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["hadoop-datanode"]
+                topologyKey: kubernetes.io/hostname
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # 1. 初始化容器：HA 初始化序列
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # namenode-0 (nn1): wait ZK+JN → formatZK → format NN → initializeSharedEdits
+      # namenode-1 (nn2): wait ZK+JN → wait nn1 RPC → bootstrapStandby
+      initContainers:
+      - name: init-namenode-ha
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            ORDINAL=${HOSTNAME##*-}
+            echo "=== NameNode HA 初始化 (Pod: ${HOSTNAME}, ordinal: ${ORDINAL}) ==="
+
+            # ── Step 0a: 修复 JVM InetAddress.getLocalHost() 返回 (unknown) 的根因 ──
+            # 实测 nsswitch=hosts: files dns myhostname，本机名 namenode-0 经 myhostname 模块
+            # 被解析成 fe80:: IPv6 链路本地地址；JVM 在 preferIPv4Stack 下无法使用它 ->
+            # getLocalHost 抛 UnknownHostException("local host is: (unknown)")，导致 NN 出站
+            # RPC / ZKFC 健康监控失败、双 standby。修法：
+            #   ① 去掉 nsswitch 的 myhostname（让 /etc/hosts 真正生效，不再被 fe80:: 覆盖）；
+            #   ② 把本机名(短名+FQDN) prepend 到 /etc/hosts 顶部绑定 127.0.0.1（压过 kubelet 行）。
+            # 注意：init 容器自身 /etc/{hosts,nsswitch.conf} 独立，不传播到主/ZKFC 容器，
+            #       故本 init 容器内跑的 hdfs zkfc -formatZK 也需自行修复。
+            sed -i 's/^hosts:.*/hosts:      files dns/' /etc/nsswitch.conf 2>/dev/null || echo "hosts:      files dns" >> /etc/nsswitch.conf
+            if ! grep -q "^127.0.0.1 $(hostname)" /etc/hosts 2>/dev/null; then
+              # 注意：/etc/hosts 是 kubelet 绑定的只读挂载，sed -i（rename 覆盖）会失败，
+              #       故用 >> 追加（已移除 nsswitch myhostname，files 优先即可正确解析本机名）。
+              echo "127.0.0.1 $(hostname) $(hostname -f 2>/dev/null)" >> /etc/hosts
+            fi
+
+            # ── Step 0: 准备可写配置目录 + 注入 per-pod NN ID ──
+            # 容器 hostname=namenode-0，与 hdfs-site 中配置的 rpc-address
+            # (namenode-0.namenode:9000) 不匹配，Hadoop HAUtil 自动识别会失败，
+            # 抛 "Could not determine own NN ID in namespace 'mycluster'" 导致 NN 直接退出。
+            # 这是 K8s 上 Hadoop HA 的标准坑：必须按 ordinal 显式设置 dfs.ha.namenode.id。
+            echo "准备配置目录并注入 dfs.ha.namenode.id ..."
+            mkdir -p /hadoop-conf
+            cp -rL /opt/hadoop/etc/hadoop/. /hadoop-conf/
+            cp /config-source/core-site.xml /hadoop-conf/core-site.xml
+            cp /config-source/hdfs-site.xml /hadoop-conf/hdfs-site.xml
+            NN_ID="nn2"
+            if [ "${ORDINAL}" = "0" ]; then NN_ID="nn1"; fi
+            # 用 awk 注入（比 sed \n 更可靠，所有镜像均自带 awk，生成标准 XML）
+            if ! grep -q "<name>dfs.ha.namenode.id</name>" /hadoop-conf/hdfs-site.xml; then
+              awk -v id="${NN_ID}" '
+                /<\/configuration>/ {
+                  print "  <property>";
+                  print "    <name>dfs.ha.namenode.id</name>";
+                  print "    <value>" id "</value>";
+                  print "  </property>";
+                }
+                { print }
+              ' /hadoop-conf/hdfs-site.xml > /hadoop-conf/hdfs-site.xml.tmp && \
+                mv /hadoop-conf/hdfs-site.xml.tmp /hadoop-conf/hdfs-site.xml
+            fi
+            echo "本节点 NN ID = ${NN_ID}"
+            echo "--- 注入校验 (hdfs-site.xml) ---"
+            grep -A1 "dfs.ha.namenode.id" /hadoop-conf/hdfs-site.xml || echo "!! NN ID 未注入 !!"
+            export HADOOP_CONF_DIR=/hadoop-conf
+
+            # ── Step 1: 准备数据目录 ──
+            echo "准备 NameNode 元数据目录..."
+            mkdir -p /opt/hadoop/data/nn1 /opt/hadoop/data/nn2
+            # 关键：init 容器与主 NN 进程均以 root (runAsUser:0) 运行，
+            # 因此元数据目录必须归 root 所有。若以 hadoop 用户执行 hdfs 命令，
+            # bootstrapStandby 调用 Active NN 的 isUpgradeFinalized RPC 会因
+            # "Superuser privilege is required" 被拒绝，导致 bootstrap 失败、
+            # name.dir 始终未格式化、主 NN 启动报 "NameNode is not formatted"。
+            CURRENT_UID=$(id -u)
+            CURRENT_GID=$(id -g)
+            chown -R ${CURRENT_UID}:${CURRENT_GID} /opt/hadoop/data
+            echo "数据目录准备完成 (owner: ${CURRENT_UID}:${CURRENT_GID})"
+
+            # ── Step 2: 等待 ZooKeeper 仲裁就绪 (3/3) ──
+            echo "等待 ZooKeeper 仲裁..."
+            until nc -z zookeeper-0.zookeeper 2181 && \
+                  nc -z zookeeper-1.zookeeper 2181 && \
+                  nc -z zookeeper-2.zookeeper 2181; do
+              echo "  ZooKeeper 尚未完全就绪..."
+              sleep 5
+            done
+            echo "ZooKeeper 仲裁就绪"
+
+            # ── Step 3: 等待 JournalNode 仲裁就绪 (≥2/3) ──
+            echo "等待 JournalNode 仲裁..."
+            JN_READY=0
+            until [ "${JN_READY}" -ge 2 ]; do
+              JN_READY=0
+              nc -z journalnode-0.journalnode 8485 && JN_READY=$((JN_READY+1)) || true
+              nc -z journalnode-1.journalnode 8485 && JN_READY=$((JN_READY+1)) || true
+              nc -z journalnode-2.journalnode 8485 && JN_READY=$((JN_READY+1)) || true
+              echo "  JournalNode 就绪: ${JN_READY}/3"
+              sleep 5
+            done
+            echo "JournalNode 仲裁就绪 (${JN_READY}/3)"
+
+            # ── Step 4: 根据 ordinal 分支执行 HA 初始化 ──
+            if [ "${ORDINAL}" = "0" ]; then
+              # ━━━━ nn1 (namenode-0): Active NameNode 初始化 ━━━━
+
+              # 4a: 格式化 ZooKeeper FC（仅首次部署时需要）
+              echo "=== nn1: 格式化 ZooKeeper FC ==="
+              # 以 root 运行（匹配主 NN 的 fsOwner=root），避免权限问题
+              hdfs zkfc -formatZK -nonInteractive || {
+                echo "ZKFC formatZK 已存在或跳过（后续重启时属正常现象）"
+              }
+
+              # 4b: 格式化 NameNode（仅首次部署，VERSION 文件不存在时）
+              echo "=== nn1: 检查 NameNode 格式化状态 ==="
+              if [ ! -f /opt/hadoop/data/nn1/current/VERSION ]; then
+                echo "首次格式化 NameNode..."
+                hdfs namenode -format -nonInteractive
+                echo "NameNode 格式化完成"
+              else
+                echo "NameNode 已格式化，跳过"
+                echo "ClusterID:"
+                grep "clusterID" /opt/hadoop/data/nn1/current/VERSION || true
+              fi
+
+              # 4c: 初始化共享编辑日志（将本地 edits 拷贝到 JournalNode）
+              # 仅首次 HA 设置需要；后续重启 JournalNode 已有数据可跳过
+              echo "=== nn1: 初始化共享编辑日志 ==="
+              hdfs namenode -initializeSharedEdits -nonInteractive || {
+                echo "共享编辑日志初始化跳过（已完成或非首次 HA 设置无需此步）"
+              }
+
+            else
+              # ━━━━ nn2 (namenode-1): Standby NameNode 初始化 ━━━━
+
+              # 4a: 等待 Active NameNode (namenode-0) RPC 就绪
+              # OrderedReady 保证 namenode-0 Ready 后才启动 namenode-1
+              # 但这里额外确认 RPC 端口可达，确保 bootstrapStandby 可连接
+              echo "=== nn2: 等待 Active NameNode (namenode-0) RPC 就绪 ==="
+              until nc -z namenode-0.namenode 9000; do
+                echo "  namenode-0 RPC 尚未就绪..."
+                sleep 10
+              done
+              echo "namenode-0 RPC 已就绪"
+
+              # 4b: Bootstrap Standby（从 Active NN 下载命名空间镜像 + 编辑日志）
+              # 使用 -force 幂等重同步：即便本地 name.dir 已存在但未格式化，
+              # 也强制格式化覆盖，避免 "data appears to exist, Not formatting"
+              # 在 -nonInteractive 下静默失败（此前正是因此崩溃）
+              echo "=== nn2: Bootstrap Standby (idempotent, -force) ==="
+              # 必须以 root 运行：bootstrap 需调用 Active NN 的 isUpgradeFinalized RPC，
+              # 该 RPC 要求 superuser 权限（Active 的 fsOwner=root），hadoop 用户会被拒。
+              hdfs namenode -bootstrapStandby -force -nonInteractive
+              echo "Bootstrap 完成，本地 ClusterID:"
+              grep "clusterID" /opt/hadoop/data/nn1/current/VERSION || true
+            fi
+
+            echo "=== NameNode HA 初始化完成 (ordinal: ${ORDINAL}) ==="
+
+        env:
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Duser.timezone=Asia/Shanghai"
+          - name: TZ
+            value: "Asia/Shanghai"
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data
+          - name: hadoop-config-volume
+            mountPath: /config-source
+          - name: hadoop-conf
+            mountPath: /hadoop-conf
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # 2. 主容器：NameNode
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      containers:
+      - name: namenode
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            # 修复 JVM InetAddress.getLocalHost() 返回 (unknown) 的根因
+            # 实测 nsswitch=hosts: files dns myhostname，本机名经 myhostname 模块被解析成
+            # fe80:: IPv6 链路本地；JVM 在 preferIPv4Stack 下无法使用 -> getLocalHost 抛 (unknown)。
+            # 修法：① 去掉 nsswitch 的 myhostname（让 /etc/hosts 生效）；
+            #       ② 把本机名(短名+FQDN) prepend 到 /etc/hosts 顶部绑定 127.0.0.1（压过 kubelet 行）。
+            # 注意：K8s 每个容器的 /etc/{hosts,nsswitch.conf} 独立，init 的写入不传播到本容器，
+            #       必须在跑 JVM 的容器自身启动时修复。
+            sed -i 's/^hosts:.*/hosts:      files dns/' /etc/nsswitch.conf 2>/dev/null || echo "hosts:      files dns" >> /etc/nsswitch.conf
+            if ! grep -q "^127.0.0.1 $(hostname)" /etc/hosts 2>/dev/null; then
+              # 注意：/etc/hosts 是 kubelet 绑定的只读挂载，sed -i（rename 覆盖）会失败，
+              #       故用 >> 追加（已移除 nsswitch myhostname，files 优先即可正确解析本机名）。
+              echo "127.0.0.1 $(hostname) $(hostname -f 2>/dev/null)" >> /etc/hosts
+            fi
+            # 兜底注入 dfs.ha.namenode.id（init 已注入，此处再确保一次，避免 init 注入失败时主进程崩溃）
+            NN_ID="nn2"
+            [ "${HOSTNAME##*-}" = "0" ] && NN_ID="nn1"
+            if ! grep -q "<name>dfs.ha.namenode.id</name>" /opt/hadoop/etc/hadoop/hdfs-site.xml; then
+              awk -v id="${NN_ID}" '
+                /<\/configuration>/ {
+                  print "  <property>";
+                  print "    <name>dfs.ha.namenode.id</name>";
+                  print "    <value>" id "</value>";
+                  print "  </property>";
+                }
+                { print }
+              ' /opt/hadoop/etc/hadoop/hdfs-site.xml > /opt/hadoop/etc/hadoop/hdfs-site.xml.tmp && \
+                mv /opt/hadoop/etc/hadoop/hdfs-site.xml.tmp /opt/hadoop/etc/hadoop/hdfs-site.xml
+            fi
+            echo "主容器 NN ID = ${NN_ID}"
+            exec hdfs namenode
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: HADOOP_HEAPSIZE
+            value: "2048"
+          - name: HADOOP_OPTS
+            value: "-Djava.net.preferIPv4Stack=true -Duser.timezone=Asia/Shanghai"
+          # 兜底：JAVA_TOOL_OPTIONS 由 JVM 启动器无条件注入，确保 preferIPv4Stack + 时区一定生效
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Djava.net.preferIPv4Stack=true -Duser.timezone=Asia/Shanghai"
+          # 时区：上海 (GMT+8)，确保 NN 元数据/编辑日志时间戳与当前环境一致
+          - name: TZ
+            value: "Asia/Shanghai"
+        securityContext:
+          runAsUser: 0
+        ports:
+          - containerPort: 9870
+            name: web
+          - containerPort: 9000
+            name: rpc
+        # Guaranteed QOS: requests = limits
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        # 健康检查：NN 启动可能较慢（HA 模式需连接 JN 同步）
+        readinessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 40
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 100
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+        startupProbe:
+          httpGet:
+            path: /jmx
+            port: 9870
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 18
+        volumeMounts:
+          - name: hadoop-nn-data
+            mountPath: /opt/hadoop/data
+          - name: hadoop-tmp
+            mountPath: /opt/hadoop/tmpdata
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+          - name: hadoop-conf
+            mountPath: /opt/hadoop/etc/hadoop
+
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # 3. Sidecar：ZKFC (ZooKeeper Failover Controller)
+      # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      # ZKFC 监控本地 NN 健康，通过 ZK 进行 Active 选举
+      # 与 NN 共享 Pod 网络命名空间，通过 localhost:9000 检查 NN
+      - name: zkfc
+        image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/zhuyifeiruichuang/hadoop:3.1.1
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            # 修复 JVM getLocalHost 返回 (unknown)（双 standby 根因之一）
+            # 实测 nsswitch=hosts: files dns myhostname，本机名经 myhostname 模块被解析成
+            # fe80:: IPv6 链路本地；JVM 在 preferIPv4Stack 下无法使用 -> getLocalHost 抛 (unknown)，
+            # ZKFC HealthMonitor 出站健康检查失败，永远无法把本 NN 提升为 Active。
+            # 修法：① 去掉 nsswitch 的 myhostname；② 把本机名(短名+FQDN) prepend /etc/hosts 顶
+            #       部绑定 127.0.0.1。init 容器的 /etc/{hosts,nsswitch.conf} 不传播到本 sidecar，
+            #       必须在此自行修复。
+            sed -i 's/^hosts:.*/hosts:      files dns/' /etc/nsswitch.conf 2>/dev/null || echo "hosts:      files dns" >> /etc/nsswitch.conf
+            if ! grep -q "^127.0.0.1 $(hostname)" /etc/hosts 2>/dev/null; then
+              # 注意：/etc/hosts 是 kubelet 绑定的只读挂载，sed -i（rename 覆盖）会失败，
+              #       故用 >> 追加（已移除 nsswitch myhostname，files 优先即可正确解析本机名）。
+              echo "127.0.0.1 $(hostname) $(hostname -f 2>/dev/null)" >> /etc/hosts
+            fi
+            # ZKFC 需等待本地 NameNode RPC 就绪后才能启动
+            echo "ZKFC: 等待本地 NameNode RPC (9000)..."
+            until nc -z 127.0.0.1 9000; do
+              echo "  ZKFC: NameNode 未就绪..."
+              sleep 5
+            done
+            echo "ZKFC: NameNode RPC 已就绪，启动 ZKFC daemon"
+            exec hdfs zkfc
+        env:
+          - name: HADOOP_CONF_DIR
+            value: "/opt/hadoop/etc/hadoop"
+          - name: HADOOP_LOG_DIR
+            value: "/opt/hadoop/logs"
+          - name: HADOOP_OPTS
+            value: "-Djava.net.preferIPv4Stack=true -Duser.timezone=Asia/Shanghai"
+          # 兜底：JAVA_TOOL_OPTIONS 由 JVM 启动器无条件注入，确保 preferIPv4Stack + 时区一定生效
+          - name: JAVA_TOOL_OPTIONS
+            value: "-Djava.net.preferIPv4Stack=true -Duser.timezone=Asia/Shanghai"
+          # 时区：上海 (GMT+8)
+          - name: TZ
+            value: "Asia/Shanghai"
+        securityContext:
+          runAsUser: 0
+        ports:
+          - containerPort: 8019
+            name: zkfc-rpc
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        # ZKFC livenessProbe：检查 RPC 端口存活
+        # 不设 readinessProbe — Pod Ready 状态由 NN 容器决定
+        livenessProbe:
+          exec:
+            command: ["nc", "-z", "127.0.0.1", "8019"]
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 5
+        volumeMounts:
+          - name: hadoop-conf
+            mountPath: /opt/hadoop/etc/hadoop
+          - name: hadoop-logs
+            mountPath: /opt/hadoop/logs
+
+      volumes:
+        - name: hadoop-config-volume
+          configMap:
+            name: hadoop-config
+        - name: hadoop-conf
+          emptyDir: {}
+        - name: hadoop-tmp
+          emptyDir: {}
+        - name: hadoop-logs
+          emptyDir: {}
+
+  # ── 存储卷模板 ──
+  # HA 模式下跨节点冗余由 HA 机制保证（JournalNode + ZKFC）
+  # nn1/nn2 目录在同一个 PVC 中，提供目录级冗余（防单目录损坏）
+  # 节点级冗余由 HA 保障：此节点故障时 Standby NN 接管 Active
+  volumeClaimTemplates:
+  - metadata:
+      name: hadoop-nn-data
+      labels:
+        app: hadoop-namenode
+        volume-role: nn-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "openebs-hostpath"
+      resources:
+        requests:
+          storage: 50Gi

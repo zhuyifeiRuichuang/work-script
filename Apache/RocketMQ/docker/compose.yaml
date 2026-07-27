@@ -1,6 +1,6 @@
 services:
   namesrv:
-    image: apache/rocketmq:5.5.0
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/rocketmq:5.5.0
     container_name: rmqnamesrv
     restart: unless-stopped
     ports:
@@ -15,7 +15,7 @@ services:
       - rocketmq
     command: sh mqnamesrv
   broker:
-    image: apache/rocketmq:5.5.0
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/rocketmq:5.5.0
     container_name: rmqbroker
     restart: unless-stopped
     ports:
@@ -36,7 +36,7 @@ services:
       - rocketmq
     command: sh mqbroker
   proxy:
-    image: apache/rocketmq:5.5.0
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/rocketmq:5.5.0
     container_name: rmqproxy
     networks:
       - rocketmq
@@ -57,7 +57,7 @@ services:
       - NAMESRV_ADDR=rmqnamesrv:9876
     command: sh mqproxy
   rocketmq-dashboard:
-    image: apacherocketmq/rocketmq-dashboard:2.1.0
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apacherocketmq/rocketmq-dashboard:2.1.0
     container_name: rocketmq-dashboard
     restart: unless-stopped
     ports:

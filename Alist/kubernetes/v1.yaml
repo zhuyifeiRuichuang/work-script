@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: alist-container
-          image: ghcr.io/alistgo/alist:v3.60.0
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/alistgo/alist:v3.62.0
 
           imagePullPolicy: IfNotPresent
 

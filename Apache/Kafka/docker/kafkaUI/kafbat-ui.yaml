@@ -1,0 +1,14 @@
+
+services:
+  kafbat-ui:
+    container_name: kafbat-ui
+    image: crpi-oo5j1q601zm6sf71.cn-hangzhou.personal.cr.aliyuncs.com/workdev/kafka-ui:b460095
+    ports:
+      - 8080:8080
+    environment:
+      DYNAMIC_CONFIG_ENABLED: 'true'
+      SWAGGER_UI_ENABLED: 'true'
+      # SPRING_CONFIG_ADDITIONAL-LOCATION: /config.yml
+    # 若使用配置文件，需开启此处配置。
+    # volumes:
+    #   - ./config.yml:/config.yml

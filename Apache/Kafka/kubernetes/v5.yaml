@@ -1,0 +1,477 @@
+# =============================================================================
+# Kafka 4.3.1 KRaft 集群 - Kubernetes 部署文件 (SSL 版)
+# 由 compose.yml (SSL 版) 转换而来 — 注意：与 k8s-kafka.yaml(由 compose-dev.yml 明文版转换) 不同
+#
+# 架构: 3 节点 KRaft 集群 (无 ZooKeeper)，每个节点同时担任 broker + controller
+# 镜像: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/kafka:4.3.1
+# 安全: 全链路 SSL (broker 间 SSL-INTERNAL + 客户端 SSL)，证书/密钥来自 Secret
+#
+# 设计决策 (grill-me 对齐 + 二次调整):
+#   1. 产物: 新建本文件，保留 k8s-kafka.yaml (明文 dev 版) 不动
+#   2. Secrets: 自包含 Secret 清单，base64 内嵌 ./secrets 下 5 个文件
+#   3. 访问: 出集群访问，每 broker 一个 NodePort Service (kafka-0-ext / 1-ext / 2-ext)
+#            —— NodePort 不再硬编码，由 Pod 启动时经 K8s API 自动读取实际分配端口，避免环境冲突
+#            外部广播地址 = status.hostIP:实际NodePort
+#   4. 资源: 默认 StorageClass(占位)、PVC 20Gi、内存 4/8Gi、CPU 1/2 核、反亲和 preferred
+#   5. conf: 更新 conf/server.properties 为 SSL KRaft 拓扑并挂载为配置文件
+#            (per-pod 动态值与 SSL 密码在容器启动时由脚本注入，避免写入 ConfigMap)
+#   6. 命名空间无关: 内部 DNS 用相对域名 (kafka-headless，而非 kafka-headless.<ns>.svc.cluster.local)
+#            —— 可直接 kubectl apply -n <任意ns> -f 部署，切换命名空间无需改配置
+#
+# 部署: kubectl apply -n <namespace> -f k8s-kafka-ssl.yaml
+# 验证: kubectl -n <namespace> exec -it kafka-0 -- \
+#         /opt/kafka/bin/kafka-metadata-quorum.sh \
+#         --bootstrap-server localhost:19093 --command-config /tmp/ssl-client.conf describe --status
+# 外部客户端连接: <任意节点IP>:<自动分配的NodePort>  (SSL，端口见 kubectl -n <ns> get svc)
+# =============================================================================
+
+---
+---
+# ── Secret: 证书与密钥 (对应 compose.yml 中挂载的 ./secrets) ─────────────────────
+# 自包含：以下 data 为 ./secrets 下 5 个文件的 base64 内容。
+# 若不想把密钥提交进 yaml，可改为：
+#   kubectl -n kafka create secret generic kafka-secrets --from-file=./secrets
+# 并删除本 Secret 段（StatefulSet 仍按同名引用）。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-secrets
+  labels:
+    app: kafka
+type: Opaque
+data:
+  # JKS 密钥库/信任库
+  kafka01.keystore.jks: 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
+  kafka.truststore.jks: MIIEYgIBAzCCBAwGCSqGSIb3DQEHAaCCA/0EggP5MIID9TCCA/EGCSqGSIb3DQEHBqCCA+IwggPeAgEAMIID1wYJKoZIhvcNAQcBMGYGCSqGSIb3DQEFDTBZMDgGCSqGSIb3DQEFDDArBBRyzo1gsKvLiEwIQEpQSWbO0ytJ1wICJxACASAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEENql3ZL9+pp6gKw6i19ldMOAggNglOsXcyl32H+s1EUOJlMOTzcf8NmlWOIgyY5gKkUN+rmLVjkVlAMGoTEYmwVrvac0b3+Za1vZi/KueGHw85Qz0OAbpmBinlK8DIes1ix6eZt21BzH1v6YYhYIbSTnvaD3vSCKCXblOkkswyDuSciAprLDyf/34HzJuxTERj6p9u+fQLNHK4R3e0lVP8TVmJQny4V6PpcXQrPEEdyQNGPVAjmFfVwu4/sV3VUzYnW7OAwAWUaqjLMg+3i8pW9JfLxuWu4NfzJJp2B0lwSvZZFPo7V67lI1MEXe1/1200rU6nRQEgyyCQ/sDhzRszIkjdTNrQA7lpgRYDlQJMz6gdzV13XJZi2AA7J/A9ocTAj8+dMGzCgd9P70JRdYhrttsw8+cEh3CBVmPIrwwhX9Nj2oQXU9iKo4FZ54XUL4XK+KOmfez/IvVDGRPxJp7YE1vvGan57FEgym7ejT45RoQSg7oDCovalvoprV45OSu5nPwWllMSkAFp7RPRl9DxLR5VDaDEbSJCKrCSx9a94gL7qzAcaAL23z3iCPd6eA9cCNav0077pUo6CMojdnVq7KYnmVrvP7S6rw1bZkpthiUZynBEKOtIbSvOtPJxKYPf4m9MmrQBSx8OYVkaa5QJMV0+TH3PMTvzj38RkOnshX8aHQUHqYpSis6BIuCUFWAg14e8sqPNi9AFIUxgQ2iY6Ej7o0v3JoXbSc7xUlK3qpdS0YJkuG6RmeM6C0EBwUtP8Xa2JgBg4aPLPwRXUh1b11XxR//MtOgqckXLnpSa4gpyySmsjLLelDoAcvKcO+gP5PhUBVmhfHL3Z0ka8B8quTAb8F5SagFoHbryrJSgBhxHjxczCdRYIh5gh+oxTGgnQ/LxtYRKPSPKkPqd2TKR5lBirsdnQPHjywFRsQPxdUY8pGzJeBu4hu4i038SEW/93ggGFokj4ZvV2XTSzCDLpnVkmIACBKf58/2C9PwZTWrmhRoJoRktod2jtym6CY44aOGWxsi7NUPN7Oe/j/ZKD5u7xkS2KjQuh/aPfqX/5aGG1UB8RjQsT19jpwfYz7j1Uy0zy4+SYCcHqVsl/57UocuOSO5VE/skIvQD8AHvCQnKe1+OmjBcM9MWUyR8ZarswJwdia8e4Q89rc5Zp/yH1QxtlPME0wMTANBglghkgBZQMEAgEFAAQg1FXENyKZiGmzS06EzeV8Tbw2DzgQvmCQDoRcxi/L83kEFMpp9WPcEldNUInCkQIyYa+mfIXOAgInEA==
+  kafka_keystore_creds: YWJjZGVmZ2gK
+  kafka_ssl_key_creds: YWJjZGVmZ2gK
+  kafka_truststore_creds: YWJjZGVmZ2gK
+
+---
+# ── ConfigMap: server.properties 基础部分 (对应 compose.yml 共享配置) ────────────
+# 不含 per-pod 动态值 (node.id / advertised.listeners / controller.quorum.voters)
+# 也不含 SSL 密码 (从 Secret 在运行时注入)，避免把密钥写进 ConfigMap。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  labels:
+    app: kafka
+data:
+  server.properties: |
+    # Base Kafka KRaft configuration (shared across all 3 brokers)
+    # Per-pod values + SSL passwords are injected at container start by the wrapper script.
+    # Mirrors compose.yml (SSL-enabled KRaft, 3 nodes broker+controller).
+
+    process.roles=broker,controller
+    controller.listener.names=CONTROLLER
+    inter.broker.listener.name=SSL-INTERNAL
+    listener.security.protocol.map=CONTROLLER:PLAINTEXT,SSL:SSL,SSL-INTERNAL:SSL
+
+    log.dirs=/tmp/kraft-combined-logs
+    cluster.id=4L6g3nShT-eMCtK--X86sw
+
+    # Replication / ISR (3-node cluster, tolerate 1 failure) — matches compose.yml
+    offsets.topic.replication.factor=2
+    transaction.state.log.replication.factor=2
+    transaction.state.log.min.isr=2
+    share.coordinator.state.topic.replication.factor=2
+    share.coordinator.state.topic.min.isr=2
+    group.initial.rebalance.delay.ms=1000
+
+    # SSL (certs/keystore mounted from Secret at /etc/kafka/secrets)
+    ssl.client.auth=required
+    ssl.keystore.type=JKS
+    ssl.keystore.location=/etc/kafka/secrets/kafka01.keystore.jks
+    ssl.truststore.type=JKS
+    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+    ssl.endpoint.identification.algorithm=
+
+---
+# ── Headless Service: 稳定 DNS，用于 broker 间通信与 controller 选举 ──────────────
+# 每个 pod 获得相对域名: kafka-0.kafka-headless (命名空间无关，部署到任意 ns 均可解析)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true   # 启动早期即可解析 DNS，便于 KRaft 选举
+  selector:
+    app: kafka
+  ports:
+    - name: ssl-internal
+      port: 19093
+      targetPort: 19093
+    - name: controller
+      port: 29092
+      targetPort: 29092
+    - name: ssl
+      port: 9093
+      targetPort: 9093
+
+---
+# ── ClusterIP Service: 集群内客户端访问 Kafka (走 SSL-INTERNAL) ──────────────────
+# 客户端连接(同命名空间): kafka:19093  (跨命名空间: kafka.<ns>.svc.cluster.local:19093)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka
+  ports:
+    - name: ssl-internal
+      port: 19093
+      targetPort: 19093
+
+---
+# ── NodePort Services: 出集群访问 (每 broker 一个) ─────────────────────
+# 外部客户端连接: <任意节点IP>:<自动分配NodePort>  (SSL)，端口见 kubectl get svc
+# 选择器用 StatefulSet 自动写入的 pod-name 标签，将每个 NodePort 锁定到对应 broker。
+# 注：NodePort 不再硬编码，Pod 启动时自动探测实际分配端口（见下方 ServiceAccount/RBAC）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-0-ext
+  labels:
+    app: kafka
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-0
+  ports:
+    - name: ssl
+      port: 9093
+      targetPort: 9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-1-ext
+  labels:
+    app: kafka
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-1
+  ports:
+    - name: ssl
+      port: 9093
+      targetPort: 9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-2-ext
+  labels:
+    app: kafka
+spec:
+  type: NodePort
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-2
+  ports:
+    - name: ssl
+      port: 9093
+      targetPort: 9093
+
+---
+# ── PodDisruptionBudget: 自愿驱逐时至少 2 个节点存活 ─────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka-pdb
+spec:
+  minAvailable: 2
+  selector:
+      matchLabels:
+        app: kafka
+
+---
+# ── ServiceAccount + RBAC: 允许 Pod 读取 NodePort Service 的实际端口 ──────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kafka-svc-reader
+  labels:
+    app: kafka
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kafka-svc-reader
+  labels:
+    app: kafka
+subjects:
+  - kind: ServiceAccount
+    name: kafka
+roleRef:
+  kind: Role
+  name: kafka-svc-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── StatefulSet: 3 节点 Kafka KRaft 集群 ───────────────────────────────────────
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  podManagementPolicy: Parallel            # 3 个 broker 同时启动，KRaft 才能凑齐多数(2/3)完成选举；OrderedReady 会因"单节点无法独自就绪"而死锁
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      # fsGroup 确保挂载的 PVC 对 GID 1000 可写（Kafka 容器以 UID 1000 运行）
+      securityContext:
+        fsGroup: 1000
+      # 优雅终止：给 Kafka 足够时间完成数据刷盘
+      terminationGracePeriodSeconds: 120
+      # 用于 init 容器通过 K8s API 读取 NodePort Service 的实际端口
+      serviceAccountName: kafka
+      # 软反亲和(preferred): 偏好把 broker 调度到不同节点，但节点资源不足时允许同节点
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - kafka
+                topologyKey: kubernetes.io/hostname
+      # 拓扑分布约束: 尽量(非强制)把 Pod 均匀分布到不同节点(maxSkew=1)，节点资源不足时允许同节点(ScheduleAnyway)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: kafka
+      # ── Init Container: 修复数据卷权限 ──
+      # 对应 compose.yml 中 init-kafka-perms 服务；并经由 K8s API 读取 kafka-N-ext 实际 nodePort 写入共享目录
+      initContainers:
+        - name: init-permissions
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/busybox:1.38.0
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              chown -R 1000:1000 /tmp/kraft-combined-logs
+              # 自动读取本 Pod 对应 NodePort Service 的实际端口（避免硬编码导致的环境冲突）
+              NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              TOKEN=$(tr -d '\n' < /var/run/secrets/kubernetes.io/serviceaccount/token)
+              CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              SVC="kafka-${HOSTNAME##*-}-ext"
+              API="https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/services/${SVC}"
+              NODE_PORT=""
+              for i in $(seq 1 30); do
+                # 捕获 wget 输出与错误，便于排查（不再 2>/dev/null 吞掉错误）
+                RESP=$(wget -q -O - --root-certificate="$CACERT" --header="Authorization: Bearer $TOKEN" "$API" 2>/tmp/wget.err)
+                WERR=$(cat /tmp/wget.err 2>/dev/null)
+                NODE_PORT=$(printf '%s' "$RESP" | grep -o '"nodePort": *[0-9]*' | head -1 | grep -o '[0-9]*')
+                if [ -n "$NODE_PORT" ]; then
+                  echo "Detected NodePort ${NODE_PORT} for ${SVC}"
+                  break
+                fi
+                # 回退：不做证书校验(-n) 再试一次
+                RESP=$(wget -q -O - -n --header="Authorization: Bearer $TOKEN" "$API" 2>/tmp/wget.err)
+                WERR2=$(cat /tmp/wget.err 2>/dev/null)
+                NODE_PORT=$(printf '%s' "$RESP" | grep -o '"nodePort": *[0-9]*' | head -1 | grep -o '[0-9]*')
+                if [ -n "$NODE_PORT" ]; then
+                  echo "Detected NodePort ${NODE_PORT} for ${SVC} (no-cert mode)"
+                  break
+                fi
+                echo "attempt $i: 未获取到 nodePort。wget错误=[${WERR}] 响应片段=[$(printf '%s' "$RESP" | head -c 160)]"
+                sleep 2
+              done
+              if [ -z "$NODE_PORT" ]; then
+                echo "FAILED 获取 nodePort。诊断: CA文件存在=$(test -f "$CACERT" && echo yes || echo no) TOKEN长度=${#TOKEN} API=$API"
+              fi
+              echo "${NODE_PORT}" > /etc/kafka/dynamic/nodePort
+          volumeMounts:
+            - name: kafka-logs
+              mountPath: /tmp/kraft-combined-logs
+            - name: kafka-dynamic
+              mountPath: /etc/kafka/dynamic
+      # ── Main Container: Kafka Broker ──
+      containers:
+        - name: kafka
+          image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/apache/kafka:4.3.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: ssl-internal
+              containerPort: 19093
+            - name: controller
+              containerPort: 29092
+            - name: ssl
+              containerPort: 9093
+          # JVM 堆大小（容器内存限制 8Gi 的 50%）
+          env:
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms2g -Xmx2g"
+            # 节点 IP，用于拼出外部广播地址 (status.hostIP)
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          # ── 启动脚本: 注入 per-pod 动态值 + 从 Secret 读 SSL 密码，再格式化并启动 ──
+          # compose.yml 中这些值是硬编码的（kafka-1→node1, kafka-2→node2, kafka-3→node3）
+          # K8s 中从 StatefulSet 的 pod 序号动态推导:
+          #   kafka-0 → NODE_ID=1, kafka-1 → NODE_ID=2, kafka-2 → NODE_ID=3
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              # 从 pod 名称提取序号 (kafka-0 -> 0)
+              ORDINAL="${HOSTNAME##*-}"
+              NODE_ID=$((ORDINAL + 1))
+              # 外部 NodePort：由 init 容器经 K8s API 自动探测并写入 /etc/kafka/dynamic/nodePort，
+              # 不再硬编码，避免与环境中已占用端口冲突。
+              EXTERNAL_NODE_PORT="$(cat /etc/kafka/dynamic/nodePort 2>/dev/null)"
+              if [ -z "${EXTERNAL_NODE_PORT}" ]; then
+                echo "ERROR: 未能自动获取 NodePort（init 容器未写入 /etc/kafka/dynamic/nodePort）。"
+                echo "       请检查 kafka-N-ext Service 是否存在、ServiceAccount/Role 的 RBAC 是否就绪、Pod 到 K8s API 的网络是否通畅。"
+                echo "       为避免对外广播错误端口，主动终止启动。"
+                exit 1
+              fi
+
+              # 从 Secret 挂载的密码文件读取 SSL 密码（去掉换行）
+              KAFKA_KEYSTORE_PASSWORD="$(tr -d '\n' < /etc/kafka/secrets/kafka_keystore_creds)"
+              KAFKA_KEY_PASSWORD="$(tr -d '\n' < /etc/kafka/secrets/kafka_ssl_key_creds)"
+              KAFKA_TRUSTSTORE_PASSWORD="$(tr -d '\n' < /etc/kafka/secrets/kafka_truststore_creds)"
+
+              # 用 ConfigMap 的基础配置生成最终配置
+              cp /mnt/kafka-config/server.properties /tmp/server.properties
+
+              # 追加每个 Pod 唯一的动态配置 + SSL 密码
+              cat >> /tmp/server.properties <<EOF
+              node.id=${NODE_ID}
+              listeners=SSL-INTERNAL://:19093,CONTROLLER://:29092,SSL://:9093
+              advertised.listeners=SSL-INTERNAL://${HOSTNAME}.kafka-headless:19093,SSL://${NODE_IP}:${EXTERNAL_NODE_PORT}
+              controller.quorum.voters=1@kafka-0.kafka-headless:29092,2@kafka-1.kafka-headless:29092,3@kafka-2.kafka-headless:29092
+              ssl.keystore.password=${KAFKA_KEYSTORE_PASSWORD}
+              ssl.key.password=${KAFKA_KEY_PASSWORD}
+              ssl.truststore.password=${KAFKA_TRUSTSTORE_PASSWORD}
+              EOF
+
+              # 生成供探针使用的 SSL 客户端配置
+              cat > /tmp/ssl-client.conf <<EOF
+              security.protocol=SSL
+              ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+              ssl.truststore.password=${KAFKA_TRUSTSTORE_PASSWORD}
+              ssl.keystore.location=/etc/kafka/secrets/kafka01.keystore.jks
+              ssl.keystore.password=${KAFKA_KEYSTORE_PASSWORD}
+              ssl.key.password=${KAFKA_KEY_PASSWORD}
+              ssl.endpoint.identification.algorithm=
+              EOF
+
+              echo "=== Kafka Broker Starting ==="
+              echo "  POD_NAME:               ${HOSTNAME}"
+              echo "  KAFKA_NODE_ID:          ${NODE_ID}"
+              echo "  NODE_IP:                ${NODE_IP}"
+              echo "  EXTERNAL_NODE_PORT:     ${EXTERNAL_NODE_PORT}"
+              echo "  ADVERTISED:             SSL-INTERNAL://${HOSTNAME}.kafka-headless:19093,SSL://${NODE_IP}:${EXTERNAL_NODE_PORT}"
+              echo "==============================="
+
+              # KRaft 存储目录首次启动需格式化（已格式化则跳过）
+              if [ ! -f /tmp/kraft-combined-logs/meta.properties ]; then
+                echo "Formatting storage with cluster id 4L6g3nShT-eMCtK--X86sw ..."
+                /opt/kafka/bin/kafka-storage.sh format -t "4L6g3nShT-eMCtK--X86sw" -c /tmp/server.properties
+              fi
+
+              # 启动 Kafka（配置即文件，不再依赖 KAFKA_* 环境变量注入）
+              exec /opt/kafka/bin/kafka-server-start.sh /tmp/server.properties
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 4Gi
+            limits:
+              cpu: 2000m
+              memory: 8Gi
+          # ── 存活探针: broker 不可达时重启 ──
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19093 --command-config /tmp/ssl-client.conf || exit 1"
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # ── 就绪探针: broker 就绪后才接收流量 ──
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19093 --command-config /tmp/ssl-client.conf || exit 1"
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: kafka-logs
+              mountPath: /tmp/kraft-combined-logs
+            - name: kafka-secrets
+              mountPath: /etc/kafka/secrets
+              readOnly: true
+            - name: kafka-config
+              mountPath: /mnt/kafka-config
+              readOnly: true
+            - name: kafka-dynamic
+              mountPath: /etc/kafka/dynamic
+      # ── 卷定义: Secret / ConfigMap / 动态共享目录 (修复：原清单缺失 volumes 声明) ──
+      volumes:
+        - name: kafka-secrets
+          secret:
+            secretName: kafka-secrets
+        - name: kafka-config
+          configMap:
+            name: kafka-config
+        - name: kafka-dynamic
+          emptyDir: {}
+  # ── 持久化存储: 每个 broker 独立 PVC ──
+  # 对应 compose.yml 中的 kafka1-logs / kafka2-logs / kafka3-logs 卷
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-logs
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi
+        # storageClassName: standard   # ← 取消注释并修改为你的集群 StorageClass

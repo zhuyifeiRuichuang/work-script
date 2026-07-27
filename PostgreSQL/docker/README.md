@@ -26,3 +26,10 @@
 
 
 参考`https://hub.docker.com/_/postgres`
+
+
+
+v1，支持pg17及更低版本
+
+v2，支持pg18及以上版本
+
